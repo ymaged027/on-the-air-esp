@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import ota_flash  # noqa: E402
 import ota_monitor  # noqa: E402
+import ota_studio  # noqa: E402
 
 
 class MockDeviceState:
@@ -280,6 +281,19 @@ class OtaFlashTests(unittest.TestCase):
         events = [json.loads(line) for line in buf.getvalue().splitlines() if line.strip()]
         open_ev = next(e for e in events if e["eventType"] == "open")
         self.assertEqual(open_ev["message"], "OK")
+
+    def test_studio_extract_html_and_auto_inject_ota(self) -> None:
+        html = ota_studio.extract_web_ui_html()
+        self.assertIn("Code Window", html)
+        self.assertIn("OTA Monitor", html)
+
+        plain = "void setup() {\n  pinMode(2, OUTPUT);\n}\nvoid loop() {}\n"
+        injected = ota_studio.ensure_ota_included(plain)
+        self.assertIn("#include <OnTheAirESP.h>", injected)
+        self.assertIn("OnTheAirESP.begin();", injected)
+
+        already = "#include <OnTheAirESP.h>\nvoid setup() { OnTheAirESP.begin(); }\nvoid loop() {}\n"
+        self.assertEqual(ota_studio.ensure_ota_included(already), already)
 
 
 if __name__ == "__main__":

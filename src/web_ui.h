@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-// Single-page Web Console + Live OTA Monitor stored in PROGMEM.
+// Single-page Web Console + Code Editor + Live OTA Monitor stored in PROGMEM.
 static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,7 +13,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   :root{--bg:#0d1117;--card:#161b22;--bd:#30363d;--tx:#e6edf3;--mut:#8b949e;--acc:#58a6ff;--ok:#3fb950;--warn:#d29922;--err:#f85149}
   *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   body{margin:0;background:var(--bg);color:var(--tx);padding:16px}
-  .wrap{max-width:780px;margin:0 auto}
+  .wrap{max-width:820px;margin:0 auto}
   h1{margin:0 0 4px;font-size:1.35rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .sub{color:var(--mut);font-size:.88rem;margin:0 0 16px}
   .badge{font-size:.74rem;padding:3px 8px;border-radius:999px;font-weight:600;border:1px solid var(--bd)}
@@ -22,31 +22,36 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .b-err{background:#2d1215;color:var(--err);border-color:#da3633}
   .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:14px}
   .card h2{margin:0 0 12px;font-size:1.02rem;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}
   .kv{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px}
   .kv .k{color:var(--mut);font-size:.73rem;text-transform:uppercase;letter-spacing:.04em}
   .kv .v{font-size:1.02rem;font-weight:600;margin-top:3px;word-break:break-all}
   label{display:block;font-size:.84rem;color:var(--mut);margin-bottom:4px}
-  input,select{width:100%;padding:8px 10px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:7px;font-size:.92rem}
+  input,select,textarea{width:100%;padding:8px 10px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:7px;font-size:.92rem}
   .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px}
   .btn{background:var(--acc);color:#0d1117;border:none;border-radius:7px;padding:9px 15px;font-weight:700;cursor:pointer;font-size:.9rem}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .btn-sm{padding:5px 10px;font-size:.8rem}
+  .btn-ok{background:var(--ok);color:#0d1117}
   .btn-sec{background:#21262d;color:var(--tx);border:1px solid var(--bd)}
   .btn-warn{background:var(--warn);color:#0d1117}
-  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-  .drop{border:2px dashed var(--bd);border-radius:10px;padding:22px;text-align:center;margin:10px 0;background:var(--bg);cursor:pointer;transition:border-color .15s,background .15s}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+  .drop{border:2px dashed var(--bd);border-radius:10px;padding:20px;text-align:center;margin:10px 0;background:var(--bg);cursor:pointer;transition:border-color .15s,background .15s}
   .drop.over{border-color:var(--acc);background:#0c1929}
   .file-name{margin-top:8px;font-size:.88rem;color:var(--acc);font-weight:600}
   .bar-bg{height:12px;background:var(--bg);border:1px solid var(--bd);border-radius:999px;overflow:hidden;margin-top:10px;display:none}
   .bar{height:100%;width:0;background:var(--acc);transition:width .15s}
-  .msg{margin-top:10px;font-size:.88rem;padding:9px 11px;border-radius:7px;display:none}
+  .msg{margin-top:10px;font-size:.88rem;padding:9px 11px;border-radius:7px;display:none;white-space:pre-wrap}
   .msg.ok{display:block;background:#12261e;color:var(--ok);border:1px solid #238636}
   .msg.err{display:block;background:#2d1215;color:var(--err);border:1px solid #da3633}
   .msg.info{display:block;background:#0c2d6b;color:#79c0ff;border:1px solid #1f6feb}
-  .term{background:#05070b;color:#7ee787;border:1px solid var(--bd);border-radius:8px;padding:12px;height:230px;overflow-y:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.83rem;line-height:1.42;white-space:pre-wrap;word-break:break-word;margin:0}
+  .term{background:#05070b;color:#7ee787;border:1px solid var(--bd);border-radius:8px;padding:12px;height:210px;overflow-y:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.83rem;line-height:1.42;white-space:pre-wrap;word-break:break-word;margin:0}
+  .code-ed{background:#05070b;color:#e6edf3;border:1px solid var(--bd);border-radius:8px;padding:12px;min-height:260px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.85rem;line-height:1.45;tab-size:2}
   .cmd-row{display:flex;gap:8px;margin-top:8px}
   .cmd-row input{flex:1;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  .chk{display:flex;align-items:center;gap:6px;font-size:.84rem;color:var(--mut);margin-top:8px;cursor:pointer}
+  .chk input{width:auto;margin:0}
+  .hint{font-size:.8rem;color:var(--mut);margin-top:6px}
 </style>
 </head>
 <body>
@@ -56,7 +61,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <span class="badge b-ok" id="badgeArmed">DISARMED</span>
     <span class="badge b-warn" id="badgeOta">CHECKING...</span>
   </h1>
-  <p class="sub">ESP32 NodeMCU-32S Wireless OTA Console &amp; OTA Monitor &bull; Wi-Fi turns 100% OFF in Normal Run Mode</p>
+  <p class="sub">ESP32 NodeMCU-32S Wireless Code Studio, OTA Flasher &amp; OTA Monitor</p>
 
   <div class="card">
     <h2>Device Telemetry</h2>
@@ -68,6 +73,27 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       <div class="kv"><div class="k">Free Heap</div><div class="v" id="stHeap">-</div></div>
       <div class="kv"><div class="k">Uptime</div><div class="v" id="stUp">-</div></div>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>
+      <span>Code Window (Arduino C++)</span>
+      <span class="badge b-warn" id="studioBadge">CHECKING COMPILER...</span>
+    </h2>
+    <textarea class="code-ed" id="codeEd" spellcheck="false"></textarea>
+    <label class="chk">
+      <input type="checkbox" id="chkKeepOta" checked>
+      Auto-keep MTR-OTA active (automatically adds <code>OnTheAirESP.begin()</code> if missing)
+    </label>
+    <div class="actions">
+      <button class="btn btn-ok" id="btnCodeFlash">Compile &amp; Flash to ESP32</button>
+      <button class="btn btn-sec" id="btnCodeCompile">Verify / Compile Only</button>
+      <button class="btn btn-sec" id="btnCodeReset">Load Example</button>
+      <button class="btn btn-sec" id="btnCodeDl">Download .ino</button>
+    </div>
+    <div class="hint" id="studioHint">Tip: Run <b>web-ide.bat</b> on your PC to enable 1-click Compile &amp; Flash directly from this window (ESP32 cannot compile C++ on-chip).</div>
+    <div class="msg" id="codeMsg"></div>
+    <pre class="term" id="buildOut" style="display:none;height:140px;margin-top:8px;color:#c9d1d9"></pre>
   </div>
 
   <div class="card">
@@ -92,35 +118,20 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   </div>
 
   <div class="card">
-    <h2>Over-The-Air Firmware Flash (.bin)</h2>
-    <div class="drop" id="dropZone">
-      <div><b>Drag &amp; drop</b> <code>on-the-air-esp.ino.bin</code> here, or <b>click to choose</b></div>
-      <div style="font-size:.8rem;color:var(--mut);margin-top:4px">Arduino IDE: Sketch &rarr; Export Compiled Binary (pick <b>.ino.bin</b>)</div>
-      <div class="file-name" id="fileLabel"></div>
-      <input id="binFile" type="file" accept=".bin" style="display:none">
-    </div>
-    <div class="actions">
-      <button class="btn" id="btnFlash">Flash Firmware</button>
-    </div>
-    <div class="bar-bg" id="barBg"><div class="bar" id="bar"></div></div>
-    <div class="msg" id="otaMsg"></div>
-  </div>
-
-  <div class="card">
-    <h2>Live Parameter Tuning (NVS Flash &mdash; No Recompile!)</h2>
+    <h2>Live Parameter Tuning (NVS Flash &mdash; Read via <code>OnTheAirESP.params()</code>)</h2>
     <div class="row">
-      <div><label>Normal Speed (0-255)</label><input id="pNorm" type="number" min="0" max="255"></div>
-      <div><label>Max Speed (0-255)</label><input id="pMax" type="number" min="0" max="255"></div>
-      <div><label>Turn Speed (0-255)</label><input id="pTurn" type="number" min="0" max="255"></div>
+      <div><label>speedNormal (0-255)</label><input id="pNorm" type="number" min="0" max="255"></div>
+      <div><label>speedMax (0-255)</label><input id="pMax" type="number" min="0" max="255"></div>
+      <div><label>turnSpeed (0-255)</label><input id="pTurn" type="number" min="0" max="255"></div>
     </div>
     <div class="row">
-      <div><label>Sensor Threshold (0-4095)</label><input id="pSens" type="number" min="0" max="4095"></div>
-      <div><label>Range Threshold (5-150 cm)</label><input id="pRng" type="number" min="5" max="150"></div>
-      <div><label>Start Delay (0-10000 ms)</label><input id="pDelay" type="number" min="0" max="10000"></div>
+      <div><label>sensorThreshold (0-4095)</label><input id="pSens" type="number" min="0" max="4095"></div>
+      <div><label>rangeThreshold (5-150 cm)</label><input id="pRng" type="number" min="5" max="150"></div>
+      <div><label>startDelayMs (0-10000 ms)</label><input id="pDelay" type="number" min="0" max="10000"></div>
     </div>
     <div class="row">
       <div>
-        <label>Operating Mode</label>
+        <label>mode (0-3)</label>
         <select id="pMode">
           <option value="0">0 - Default</option>
           <option value="1">1 - Profile 1</option>
@@ -134,6 +145,21 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       <button class="btn btn-sec" id="btnResetParams">Reset Defaults</button>
     </div>
     <div class="msg" id="paramMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Direct Binary Flash (.bin)</h2>
+    <div class="drop" id="dropZone">
+      <div><b>Drag &amp; drop</b> <code>.ino.bin</code> here, or <b>click to choose</b></div>
+      <div style="font-size:.8rem;color:var(--mut);margin-top:4px">Arduino IDE: Sketch &rarr; Export Compiled Binary (pick <b>.ino.bin</b>)</div>
+      <div class="file-name" id="fileLabel"></div>
+      <input id="binFile" type="file" accept=".bin" style="display:none">
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnFlash">Flash .bin</button>
+    </div>
+    <div class="bar-bg" id="barBg"><div class="bar" id="bar"></div></div>
+    <div class="msg" id="otaMsg"></div>
   </div>
 
   <div class="card">
@@ -153,6 +179,23 @@ let selectedFile = null;
 let monCursor = 0;
 let monPaused = false;
 let monFirst = true;
+let studioBase = "";
+
+const DEFAULT_CODE = `#include <OnTheAirESP.h>
+
+void setup() {
+  OnTheAirESP.begin();  // Zero buttons! Keeps MTR-OTA & OTA Monitor live
+  OtaMonitor.println("ESP32 started!");
+}
+
+void loop() {
+  // Read live-tuned parameters directly from the Web Portal:
+  auto &p = OnTheAirESP.params();
+  OtaMonitor.printf("speedNormal=%u speedMax=%u sensorThr=%u mode=%u\\n",
+                    p.speedNormal, p.speedMax, p.sensorThreshold, p.mode);
+  delay(2000);
+}
+`;
 
 function showMsg(el, cls, txt) {
   el.className = "msg " + cls;
@@ -165,17 +208,108 @@ function getToken() {
   return t;
 }
 
+// --- Code Window + Local Compiler Studio Detection ---
+const ed = $("codeEd");
+ed.value = localStorage.getItem("ota_web_code") || DEFAULT_CODE;
+ed.addEventListener("input", () => localStorage.setItem("ota_web_code", ed.value));
+ed.addEventListener("keydown", e => {
+  if (e.key === "Tab") {
+    e.preventDefault();
+    const s = ed.selectionStart, end = ed.selectionEnd;
+    ed.value = ed.value.substring(0, s) + "  " + ed.value.substring(end);
+    ed.selectionStart = ed.selectionEnd = s + 2;
+  }
+});
+
+async function detectStudio() {
+  const candidates = (location.hostname === "127.0.0.1" || location.hostname === "localhost")
+    ? [""] : ["http://127.0.0.1:8080"];
+  for (const base of candidates) {
+    try {
+      const r = await fetch(base + "/local/health", {cache: "no-store"});
+      const d = await r.json();
+      if (d && d.studio) {
+        studioBase = base;
+        $("studioBadge").textContent = "COMPILER READY";
+        $("studioBadge").className = "badge b-ok";
+        $("studioHint").textContent = "Connected to local PC compiler (web-ide.bat) — 1-click Compile & Flash ready!";
+        return true;
+      }
+    } catch (e) {}
+  }
+  studioBase = "";
+  $("studioBadge").textContent = "PC COMPILER OFFLINE";
+  $("studioBadge").className = "badge b-warn";
+  return false;
+}
+
+async function runCodeAction(doFlash) {
+  const ok = await detectStudio();
+  if (!ok) {
+    return showMsg($("codeMsg"), "err",
+      "Local PC compiler is not running.\nDouble-click web-ide.bat on your PC (it opens http://127.0.0.1:8080 with full 1-click Compile & Flash), or click 'Download .ino'.");
+  }
+
+  $("btnCodeFlash").disabled = true;
+  $("btnCodeCompile").disabled = true;
+  $("buildOut").style.display = "block";
+  $("buildOut").textContent = doFlash ? "Compiling & flashing to ESP32 over Wi-Fi...\n" : "Compiling sketch...\n";
+  showMsg($("codeMsg"), "info", doFlash ? "Compiling & flashing via PC compiler (usually 5-15s)..." : "Compiling...");
+
+  try {
+    const r = await fetch(studioBase + "/local/compile", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        code: ed.value,
+        flash: doFlash,
+        autoKeepOta: $("chkKeepOta").checked,
+        token: getToken() || "mtr-ota007"
+      })
+    });
+    const d = await r.json();
+    $("buildOut").textContent = d.output || "";
+    $("buildOut").scrollTop = $("buildOut").scrollHeight;
+    if (r.ok && d.ok) {
+      showMsg($("codeMsg"), "ok", d.message || (doFlash ? "Compiled & flashed!" : "Compile succeeded!"));
+      if (doFlash) setTimeout(waitReconnect, 2500);
+    } else {
+      showMsg($("codeMsg"), "err", d.error || "Compile/Flash failed (see build log below).");
+    }
+  } catch (e) {
+    showMsg($("codeMsg"), "err", "Lost connection to local PC compiler: " + e);
+  } finally {
+    $("btnCodeFlash").disabled = false;
+    $("btnCodeCompile").disabled = false;
+  }
+}
+
+$("btnCodeFlash").onclick = () => runCodeAction(true);
+$("btnCodeCompile").onclick = () => runCodeAction(false);
+$("btnCodeReset").onclick = () => {
+  ed.value = DEFAULT_CODE;
+  localStorage.setItem("ota_web_code", ed.value);
+  showMsg($("codeMsg"), "info", "Loaded starter example using OnTheAirESP.params() + OtaMonitor.");
+};
+$("btnCodeDl").onclick = () => {
+  const blob = new Blob([ed.value], {type: "text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "on-the-air-esp.ino";
+  a.click();
+};
+
+// --- Binary Drag & Drop ---
 function setFile(f) {
   selectedFile = f;
   if (!f) { $("fileLabel").textContent = ""; return; }
   $("fileLabel").textContent = f.name + " (" + Math.round(f.size / 1024) + " KB)";
   if (/bootloader|partitions|boot_app0/i.test(f.name)) {
-    showMsg($("otaMsg"), "err", "Wrong file! Pick on-the-air-esp.ino.bin (NOT bootloader or partitions).");
+    showMsg($("otaMsg"), "err", "Wrong file! Pick *.ino.bin (NOT bootloader or partitions).");
   } else {
     $("otaMsg").className = "msg";
   }
 }
-
 const dz = $("dropZone");
 dz.onclick = () => $("binFile").click();
 $("binFile").onchange = e => setFile(e.target.files[0] || null);
@@ -187,6 +321,7 @@ dz.ondrop = e => {
   if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
 };
 
+// --- OTA Monitor ---
 async function pollLogs() {
   if (monPaused) return;
   try {
@@ -237,6 +372,7 @@ $("btnMonClear").onclick = async () => {
   monCursor = 0;
 };
 
+// --- Telemetry & Parameters ---
 async function fetchStatus() {
   try {
     const r = await fetch("/api/status");
@@ -283,6 +419,7 @@ function waitReconnect() {
     const d = await fetchStatus();
     if (d && d.ok) {
       clearInterval(iv);
+      showMsg($("codeMsg"), "ok", "ESP32 rebooted & back online! Slot " + d.partition + " (" + d.otaState + ").");
       showMsg($("otaMsg"), "ok", "Back online! Running v" + d.version + " on slot " + d.partition + " (" + d.otaState + ").");
     } else if (tries > 15) {
       clearInterval(iv);
@@ -292,16 +429,13 @@ function waitReconnect() {
 
 $("btnFlash").onclick = async () => {
   const file = selectedFile || $("binFile").files[0];
-  if (!file) return showMsg($("otaMsg"), "err", "Drop or select on-the-air-esp.ino.bin first.");
+  if (!file) return showMsg($("otaMsg"), "err", "Drop or select a .ino.bin file first.");
   if (!file.name.endsWith(".bin")) return showMsg($("otaMsg"), "err", "File must end with .bin");
   if (/bootloader|partitions|boot_app0/i.test(file.name)) {
-    return showMsg($("otaMsg"), "err", "Wrong file! Pick on-the-air-esp.ino.bin (NOT bootloader or partitions).");
+    return showMsg($("otaMsg"), "err", "Wrong file! Pick *.ino.bin (NOT bootloader or partitions).");
   }
-
   const head = new Uint8Array(await file.slice(0, 1).arrayBuffer());
-  if (head[0] !== 0xE9) {
-    return showMsg($("otaMsg"), "err", "Not a valid ESP32 app image (missing 0xE9 header).");
-  }
+  if (head[0] !== 0xE9) return showMsg($("otaMsg"), "err", "Not a valid ESP32 app image (missing 0xE9 header).");
 
   const tok = getToken();
   const fd = new FormData();
@@ -316,7 +450,6 @@ $("btnFlash").onclick = async () => {
   xhr.open("POST", "/api/ota", true);
   xhr.setRequestHeader("X-OTA-Token", tok);
   if (deviceId) xhr.setRequestHeader("X-Target-Device", deviceId);
-
   xhr.upload.onprogress = e => {
     if (e.lengthComputable) $("bar").style.width = Math.round((e.loaded / e.total) * 100) + "%";
   };
@@ -358,7 +491,7 @@ $("btnSaveParams").onclick = async () => {
     body
   });
   const d = await r.json().catch(() => ({}));
-  if (r.ok && d.ok) showMsg($("paramMsg"), "ok", "Parameters saved to NVS flash!");
+  if (r.ok && d.ok) showMsg($("paramMsg"), "ok", "Parameters saved to NVS flash! Active immediately in OnTheAirESP.params().");
   else showMsg($("paramMsg"), "err", "Failed: " + (d.error || r.status));
 };
 
@@ -389,7 +522,8 @@ $("btnReboot").onclick = async () => {
 };
 
 const savedTok = localStorage.getItem("ota_auth_token");
-if (savedTok) $("token").value = savedTok;
+$("token").value = savedTok || "mtr-ota007";
+detectStudio();
 fetchStatus();
 fetchParams();
 pollLogs();

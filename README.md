@@ -55,7 +55,41 @@ Power on your ESP32 and connect Wi-Fi to **`MTR-OTA`** (password: **`mtr-ota007`
 
 1. **Direct Inside Arduino IDE:** Select **Tools → Port → `MTR-OTA at 192.168.4.1`** → click **Upload (→)** → password **`mtr-ota007`**.
 2. **1-Click `flash.bat` (Windows):** Double-click **`flash.bat`** to compile & flash the starter sketch — or **drag & drop ANY `.ino` file onto `flash.bat`**!
-3. **Phone or Browser (Auto-Popup Captive Portal):** Connecting to `MTR-OTA` pops open the Web Console (`http://192.168.4.1`, or double-click `open-console.bat`) with live **OTA Monitor**, 2-second NVS parameter tuning, drag-and-drop `.bin` flashing, and 1-click Rollback.
+3. **Web Portal + Browser Code Window (`web-ide.bat` or `http://192.168.4.1`):**
+   - Double-click **`web-ide.bat`** to open the full Web Portal at **`http://127.0.0.1:8080`** (and enable 1-click **Compile & Flash** inside `http://192.168.4.1` too!).
+   - Paste or edit Arduino C++ code directly in the browser **Code Window** and click **Compile & Flash to ESP32** (automatically keeps `OnTheAirESP.begin()` included so you never lose OTA!).
+   - Also includes live **OTA Monitor**, live NVS parameter tuning, drag-and-drop `.bin` flashing, and 1-click Rollback.
+
+---
+
+## Using the Web Portal Parameters in Your Code
+
+Every value you save in the **Live Parameter Tuning** card is stored in ESP32 NVS flash and updates **immediately** in `OnTheAirESP.params()` — no recompile needed:
+
+```cpp
+#include <OnTheAirESP.h>
+
+void setup() {
+  OnTheAirESP.begin();
+}
+
+void loop() {
+  auto &p = OnTheAirESP.params();  // Live values from the Web Portal!
+
+  int baseSpeed   = p.speedNormal;      // 0..255
+  int boostSpeed  = p.speedMax;         // 0..255
+  int turnSpd     = p.turnSpeed;        // 0..255
+  int sensorLimit = p.sensorThreshold;  // 0..4095
+  int rangeCm     = p.rangeThreshold;   // 5..150
+  int startDelay  = p.startDelayMs;     // 0..10000
+  int activeMode  = p.mode;             // 0..3
+
+  if (activeMode == 1) {
+    // Run Profile 1 using boostSpeed, sensorLimit, etc.
+  }
+  delay(10);
+}
+```
 
 *(Need Wi-Fi 100% OFF for an RF-strict competition? Call `OnTheAirESP.setAlwaysOn(false);` before `OnTheAirESP.begin();`, or wire a Safe Recovery switch to `GPIO 33 → GND` to boot into isolated OTA-only mode.)*
 
