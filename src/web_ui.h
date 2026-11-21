@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-// Single-page Web Console + Code Editor + Live OTA Monitor stored in PROGMEM.
+// Single-page Web Console + .ino/.bin Upload + Code Editor + Live OTA Monitor (PROGMEM).
 static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -46,7 +46,8 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .msg.err{display:block;background:#2d1215;color:var(--err);border:1px solid #da3633}
   .msg.info{display:block;background:#0c2d6b;color:#79c0ff;border:1px solid #1f6feb}
   .term{background:#05070b;color:#7ee787;border:1px solid var(--bd);border-radius:8px;padding:12px;height:210px;overflow-y:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.83rem;line-height:1.42;white-space:pre-wrap;word-break:break-word;margin:0}
-  .code-ed{background:#05070b;color:#e6edf3;border:1px solid var(--bd);border-radius:8px;padding:12px;min-height:260px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.85rem;line-height:1.45;tab-size:2}
+  .code-ed{background:#05070b;color:#e6edf3;border:1px solid var(--bd);border-radius:8px;padding:12px;min-height:250px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.85rem;line-height:1.45;tab-size:2}
+  .code-ed.over{border-color:var(--acc);background:#0c1929}
   .cmd-row{display:flex;gap:8px;margin-top:8px}
   .cmd-row input{flex:1;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
   .chk{display:flex;align-items:center;gap:6px;font-size:.84rem;color:var(--mut);margin-top:8px;cursor:pointer}
@@ -61,7 +62,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <span class="badge b-ok" id="badgeArmed">DISARMED</span>
     <span class="badge b-warn" id="badgeOta">CHECKING...</span>
   </h1>
-  <p class="sub">ESP32 NodeMCU-32S Wireless Code Studio, OTA Flasher &amp; OTA Monitor</p>
+  <p class="sub">ESP32 NodeMCU-32S Wireless Code Studio, .ino/.bin Flasher &amp; OTA Monitor</p>
 
   <div class="card">
     <h2>Device Telemetry</h2>
@@ -77,21 +78,23 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
   <div class="card">
     <h2>
-      <span>Code Window (Arduino C++)</span>
+      <span>Code Window (Paste or Drop <code>.ino</code> File)</span>
       <span class="badge b-warn" id="studioBadge">CHECKING COMPILER...</span>
     </h2>
     <textarea class="code-ed" id="codeEd" spellcheck="false"></textarea>
+    <input id="inoPicker" type="file" accept=".ino,.cpp,.h,.txt" style="display:none">
     <label class="chk">
       <input type="checkbox" id="chkKeepOta" checked>
       Auto-keep MTR-OTA active (automatically adds <code>OnTheAirESP.begin()</code> if missing)
     </label>
     <div class="actions">
       <button class="btn btn-ok" id="btnCodeFlash">Compile &amp; Flash to ESP32</button>
-      <button class="btn btn-sec" id="btnCodeCompile">Verify / Compile Only</button>
+      <button class="btn btn-sec" id="btnCodeCompile">Verify Only</button>
+      <button class="btn btn-sec" id="btnOpenIno">Open .ino File</button>
       <button class="btn btn-sec" id="btnCodeReset">Load Example</button>
       <button class="btn btn-sec" id="btnCodeDl">Download .ino</button>
     </div>
-    <div class="hint" id="studioHint">Tip: Run <b>web-ide.bat</b> on your PC to enable 1-click Compile &amp; Flash directly from this window (ESP32 cannot compile C++ on-chip).</div>
+    <div class="hint" id="studioHint">Install the silent background compiler once (<code>install-background-compiler.bat</code>) so compiling works automatically with no terminal window!</div>
     <div class="msg" id="codeMsg"></div>
     <pre class="term" id="buildOut" style="display:none;height:140px;margin-top:8px;color:#c9d1d9"></pre>
   </div>
@@ -148,15 +151,15 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   </div>
 
   <div class="card">
-    <h2>Direct Binary Flash (.bin)</h2>
+    <h2>Upload File (.ino or .bin)</h2>
     <div class="drop" id="dropZone">
-      <div><b>Drag &amp; drop</b> <code>.ino.bin</code> here, or <b>click to choose</b></div>
-      <div style="font-size:.8rem;color:var(--mut);margin-top:4px">Arduino IDE: Sketch &rarr; Export Compiled Binary (pick <b>.ino.bin</b>)</div>
+      <div><b>Drag &amp; drop</b> any <code>.ino</code> sketch or <code>.ino.bin</code> file here, or <b>click to choose</b></div>
+      <div style="font-size:.8rem;color:var(--mut);margin-top:4px"><code>.ino</code> auto-compiles &amp; flashes via background compiler &bull; <code>.bin</code> flashes directly</div>
       <div class="file-name" id="fileLabel"></div>
-      <input id="binFile" type="file" accept=".bin" style="display:none">
+      <input id="binFile" type="file" accept=".bin,.ino" style="display:none">
     </div>
     <div class="actions">
-      <button class="btn" id="btnFlash">Flash .bin</button>
+      <button class="btn" id="btnFlash">Flash File</button>
     </div>
     <div class="bar-bg" id="barBg"><div class="bar" id="bar"></div></div>
     <div class="msg" id="otaMsg"></div>
@@ -208,7 +211,7 @@ function getToken() {
   return t;
 }
 
-// --- Code Window + Local Compiler Studio Detection ---
+// --- Code Window + .ino File Loader + Silent Compiler Detection ---
 const ed = $("codeEd");
 ed.value = localStorage.getItem("ota_web_code") || DEFAULT_CODE;
 ed.addEventListener("input", () => localStorage.setItem("ota_web_code", ed.value));
@@ -221,9 +224,33 @@ ed.addEventListener("keydown", e => {
   }
 });
 
+async function loadInoIntoEditor(file) {
+  const txt = await file.text();
+  ed.value = txt;
+  localStorage.setItem("ota_web_code", txt);
+  showMsg($("codeMsg"), "info", "Loaded " + file.name + " (" + txt.length + " chars) into Code Window. Click 'Compile & Flash to ESP32'!");
+}
+
+ed.addEventListener("dragover", e => { e.preventDefault(); ed.classList.add("over"); });
+ed.addEventListener("dragleave", () => ed.classList.remove("over"));
+ed.addEventListener("drop", async e => {
+  if (e.dataTransfer.files && e.dataTransfer.files.length) {
+    e.preventDefault();
+    ed.classList.remove("over");
+    await loadInoIntoEditor(e.dataTransfer.files[0]);
+  }
+});
+
+$("btnOpenIno").onclick = () => $("inoPicker").click();
+$("inoPicker").onchange = async e => {
+  const f = e.target.files[0];
+  if (f) await loadInoIntoEditor(f);
+  e.target.value = "";
+};
+
 async function detectStudio() {
   const candidates = (location.hostname === "127.0.0.1" || location.hostname === "localhost")
-    ? [""] : ["http://127.0.0.1:8080"];
+    ? [""] : ["http://127.0.0.1:8080", "http://localhost:8080"];
   for (const base of candidates) {
     try {
       const r = await fetch(base + "/local/health", {cache: "no-store"});
@@ -232,36 +259,38 @@ async function detectStudio() {
         studioBase = base;
         $("studioBadge").textContent = "COMPILER READY";
         $("studioBadge").className = "badge b-ok";
-        $("studioHint").textContent = "Connected to local PC compiler (web-ide.bat) — 1-click Compile & Flash ready!";
+        $("studioHint").textContent = "Background compiler ready — paste code or drop any .ino file and click Compile & Flash!";
         return true;
       }
     } catch (e) {}
   }
   studioBase = "";
-  $("studioBadge").textContent = "PC COMPILER OFFLINE";
+  $("studioBadge").textContent = "COMPILER OFFLINE";
   $("studioBadge").className = "badge b-warn";
+  $("studioHint").innerHTML = "Compiler not detected. Run <code>install-background-compiler.bat</code> once (or in Brave on 192.168.4.1, disable Shields for this page / bookmark <code>http://127.0.0.1:8080</code>).";
   return false;
 }
 
-async function runCodeAction(doFlash) {
+async function runCodeAction(doFlash, codeOverride = null) {
   const ok = await detectStudio();
   if (!ok) {
     return showMsg($("codeMsg"), "err",
-      "Local PC compiler is not running.\nDouble-click web-ide.bat on your PC (it opens http://127.0.0.1:8080 with full 1-click Compile & Flash), or click 'Download .ino'.");
+      "Background PC compiler is not reachable.\nRun install-background-compiler.bat once (starts silently at login with no terminal window), or bookmark http://127.0.0.1:8080 (Brave Shields blocks 192.168.4.1 -> localhost by default).");
   }
 
   $("btnCodeFlash").disabled = true;
   $("btnCodeCompile").disabled = true;
+  $("btnFlash").disabled = true;
   $("buildOut").style.display = "block";
   $("buildOut").textContent = doFlash ? "Compiling & flashing to ESP32 over Wi-Fi...\n" : "Compiling sketch...\n";
-  showMsg($("codeMsg"), "info", doFlash ? "Compiling & flashing via PC compiler (usually 5-15s)..." : "Compiling...");
+  showMsg($("codeMsg"), "info", doFlash ? "Compiling & flashing (usually 5-15s)..." : "Compiling...");
 
   try {
     const r = await fetch(studioBase + "/local/compile", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
-        code: ed.value,
+        code: codeOverride !== null ? codeOverride : ed.value,
         flash: doFlash,
         autoKeepOta: $("chkKeepOta").checked,
         token: getToken() || "mtr-ota007"
@@ -277,10 +306,11 @@ async function runCodeAction(doFlash) {
       showMsg($("codeMsg"), "err", d.error || "Compile/Flash failed (see build log below).");
     }
   } catch (e) {
-    showMsg($("codeMsg"), "err", "Lost connection to local PC compiler: " + e);
+    showMsg($("codeMsg"), "err", "Lost connection to background compiler: " + e);
   } finally {
     $("btnCodeFlash").disabled = false;
     $("btnCodeCompile").disabled = false;
+    $("btnFlash").disabled = false;
   }
 }
 
@@ -299,13 +329,16 @@ $("btnCodeDl").onclick = () => {
   a.click();
 };
 
-// --- Binary Drag & Drop ---
-function setFile(f) {
+// --- File Upload (.ino OR .bin) ---
+async function setFile(f) {
   selectedFile = f;
   if (!f) { $("fileLabel").textContent = ""; return; }
-  $("fileLabel").textContent = f.name + " (" + Math.round(f.size / 1024) + " KB)";
-  if (/bootloader|partitions|boot_app0/i.test(f.name)) {
-    showMsg($("otaMsg"), "err", "Wrong file! Pick *.ino.bin (NOT bootloader or partitions).");
+  $("fileLabel").textContent = f.name + " (" + Math.max(1, Math.round(f.size / 1024)) + " KB)";
+  if (f.name.toLowerCase().endsWith(".ino")) {
+    await loadInoIntoEditor(f);
+    showMsg($("otaMsg"), "info", "Arduino sketch (.ino) selected & loaded into Code Window — click 'Flash File' to compile & flash!");
+  } else if (/bootloader|partitions|boot_app0/i.test(f.name)) {
+    showMsg($("otaMsg"), "err", "Wrong file! Pick *.ino.bin or *.ino (NOT bootloader or partitions).");
   } else {
     $("otaMsg").className = "msg";
   }
@@ -433,8 +466,18 @@ function waitReconnect() {
 
 $("btnFlash").onclick = async () => {
   const file = selectedFile || $("binFile").files[0];
-  if (!file) return showMsg($("otaMsg"), "err", "Drop or select a .ino.bin file first.");
-  if (!file.name.endsWith(".bin")) return showMsg($("otaMsg"), "err", "File must end with .bin");
+  if (!file) return showMsg($("otaMsg"), "err", "Drop or select a .ino or .bin file first.");
+
+  if (file.name.toLowerCase().endsWith(".ino")) {
+    const src = await file.text();
+    ed.value = src;
+    localStorage.setItem("ota_web_code", src);
+    showMsg($("otaMsg"), "info", "Compiling & flashing " + file.name + " (see Code Window log above)...");
+    await runCodeAction(true, src);
+    return;
+  }
+
+  if (!file.name.endsWith(".bin")) return showMsg($("otaMsg"), "err", "File must end with .ino or .bin");
   if (/bootloader|partitions|boot_app0/i.test(file.name)) {
     return showMsg($("otaMsg"), "err", "Wrong file! Pick *.ino.bin (NOT bootloader or partitions).");
   }

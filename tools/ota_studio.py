@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-MTR-OTA Local Web Code Studio (Zero-Dependency Python 3)
-========================================================
-Runs a tiny local bridge at http://127.0.0.1:8080 so you can paste or write
-Arduino C++ code directly inside the Web Portal and compile + wirelessly flash
-it to your ESP32 NodeMCU-32S in 1 click!
+MTR-OTA Local Web Code Studio & Silent Background Compiler (Zero-Dependency Python 3)
+=====================================================================================
+Compiles pasted Arduino C++ code or uploaded .ino files and flashes them wirelessly
+to your ESP32 NodeMCU-32S in 1 click!
 
-Works in BOTH places:
-  1. Open http://127.0.0.1:8080 directly (double-click web-ide.bat)
-  2. Or open http://192.168.4.1 (auto-detects this studio via CORS!)
+Can run in two ways:
+  1. Invisible Background Service (RECOMMENDED — zero terminal windows, auto-starts at login):
+       python tools/ota_studio.py --install-startup
+     (or double-click install-background-compiler.bat once!)
+     After that, you NEVER need web-ide.bat — just open http://127.0.0.1:8080 or http://192.168.4.1!
+  2. Manual Foreground Mode:
+       python tools/ota_studio.py  (or double-click web-ide.bat)
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import argparse
 import http.client
 import http.server
 import json
+import os
 import re
 import subprocess
 import sys
@@ -30,11 +34,101 @@ from typing import Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WEB_UI_HEADER = REPO_ROOT / "src" / "web_ui.h"
+STARTUP_VBS_NAME = "MTR-OTA-Compiler.vbs"
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ota_flash  # noqa: E402
 
 RAW_LITERAL_RE = re.compile(r'R"rawliteral\((.*?)\)rawliteral"', re.DOTALL)
 SETUP_DEF_RE = re.compile(r"(void\s+setup\s*\([^)]*\)\s*\{)")
+
+
+def _configure_windowless_io() -> None:
+    """When launched silently under pythonw.exe, redirect None stdout/stderr to a temp log file."""
+    if sys.stdout is None or sys.stderr is None:
+        log_path = Path(tempfile.gettempdir()) / "mtr-ota-compiler.log"
+        fh = open(log_path, "a", encoding="utf-8", buffering=1)
+        if sys.stdout is None:
+            sys.stdout = fh
+        if sys.stderr is None:
+            sys.stderr = fh
+
+
+def is_studio_running(port: int = 8080) -> bool:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/local/health", timeout=1.0) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return bool(data.get("studio"))
+    except Exception:
+        return False
+
+
+def stop_running_studio(port: int = 8080) -> bool:
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/local/shutdown", method="POST")
+        with urllib.request.urlopen(req, timeout=1.5):
+            return True
+    except Exception:
+        return False
+
+
+def default_windows_startup_dir() -> Path:
+    appdata = os.environ.get("APPDATA", "")
+    if appdata:
+        return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    return Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def find_pythonw(python_exe: str = sys.executable) -> Path:
+    p = Path(python_exe).resolve()
+    pw = p.with_name("pythonw.exe")
+    return pw if pw.is_file() else p
+
+
+def install_background_compiler_startup(
+    startup_dir: Optional[Path] = None,
+    port: int = 8080,
+    start_now: bool = True,
+) -> Path:
+    """Create a silent Windows Startup VBS launcher (zero console window) and optionally start it now."""
+    target_dir = startup_dir or default_windows_startup_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    vbs_path = target_dir / STARTUP_VBS_NAME
+
+    pyw = find_pythonw()
+    script = Path(__file__).resolve()
+    cmd = f'"""{pyw}"" ""{script}"" --no-browser --port {port}"'
+    vbs_content = (
+        "' On The Air ESP (MTR-OTA) Silent Background Compiler\n"
+        'Set WshShell = CreateObject("WScript.Shell")\n'
+        f"WshShell.Run {cmd}, 0, False\n"
+    )
+    vbs_path.write_text(vbs_content, encoding="utf-8")
+
+    if start_now and not is_studio_running(port):
+        flags = 0
+        if os.name == "nt":
+            flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(
+            [str(pyw), str(script), "--no-browser", "--port", str(port)],
+            creationflags=flags,
+            close_fds=True,
+        )
+    return vbs_path
+
+
+def uninstall_background_compiler_startup(
+    startup_dir: Optional[Path] = None,
+    port: int = 8080,
+) -> bool:
+    """Stop the silent background compiler and remove it from Windows Startup."""
+    stop_running_studio(port)
+    target_dir = startup_dir or default_windows_startup_dir()
+    vbs_path = target_dir / STARTUP_VBS_NAME
+    if vbs_path.is_file():
+        vbs_path.unlink()
+        return True
+    return False
 
 
 def extract_web_ui_html(header_path: Path = WEB_UI_HEADER) -> str:
@@ -47,10 +141,7 @@ def extract_web_ui_html(header_path: Path = WEB_UI_HEADER) -> str:
 
 
 def ensure_ota_included(code: str) -> str:
-    """
-    Safety guard: if a pasted sketch forgot #include <OnTheAirESP.h>,
-    automatically inject it + OnTheAirESP.begin() so wireless OTA is never lost!
-    """
+    """Automatically inject OnTheAirESP if a pasted sketch forgot it so OTA is never lost."""
     if "OnTheAirESP.h" in code or "OnTheAirESP.begin" in code:
         return code
 
@@ -67,7 +158,7 @@ def compile_code_string(
     auto_keep_ota: bool = True,
     fqbn: str = ota_flash.DEFAULT_FQBN,
 ) -> Tuple[bool, str, Optional[Path]]:
-    """Write code to a persistent temp sketch folder and compile with Arduino IDE's arduino-cli."""
+    """Write code to a persistent temp sketch folder and compile silently via arduino-cli."""
     cli = ota_flash.find_arduino_cli()
     if not cli:
         return (
@@ -96,7 +187,8 @@ def compile_code_string(
         str(build_dir),
         str(sketch_dir),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    res = subprocess.run(cmd, capture_output=True, text=True, creationflags=flags)
     output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
     output = output.strip()
 
@@ -109,7 +201,7 @@ def compile_code_string(
     return True, output, bin_path
 
 
-def make_studio_handler(esp_host: str, fqbn: str):
+def make_studio_handler(esp_host: str, fqbn: str, server_ref: list):
     class StudioHandler(http.server.BaseHTTPRequestHandler):
         def log_message(self, format, *args):  # noqa: A002
             return
@@ -117,7 +209,10 @@ def make_studio_handler(esp_host: str, fqbn: str):
         def _send_cors(self) -> None:
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-OTA-Token, X-Target-Device, X-Firmware-MD5")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type, X-OTA-Token, X-Target-Device, X-Firmware-MD5",
+            )
             self.send_header("Access-Control-Allow-Private-Network", "true")
 
         def _send_json(self, code: int, payload: dict) -> None:
@@ -187,6 +282,12 @@ def make_studio_handler(esp_host: str, fqbn: str):
             self._send_json(404, {"ok": False, "error": "Not found"})
 
         def do_POST(self):  # noqa: N802
+            if self.path == "/local/shutdown":
+                self._send_json(200, {"ok": True, "message": "Shutting down background compiler."})
+                if server_ref:
+                    threading.Thread(target=server_ref[0].shutdown, daemon=True).start()
+                return
+
             if self.path == "/local/compile":
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length).decode("utf-8", errors="replace")
@@ -230,7 +331,8 @@ def make_studio_handler(esp_host: str, fqbn: str):
                             {
                                 "ok": True,
                                 "message": f"Compiled & flashed ({info['size'] // 1024} KB)! ESP32 is rebooting...",
-                                "output": build_log + f"\n\n[OTA] Flashed {bin_path.name} ({info['size']} bytes, MD5={info['md5']}).",
+                                "output": build_log
+                                + f"\n\n[OTA] Flashed {bin_path.name} ({info['size']} bytes, MD5={info['md5']}).",
                             },
                         )
                     else:
@@ -260,24 +362,48 @@ def make_studio_handler(esp_host: str, fqbn: str):
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="MTR-OTA Local Web Code Studio")
-    parser.add_argument("--port", type=int, default=8080, help="Local studio HTTP port (default: 8080)")
+    _configure_windowless_io()
+    parser = argparse.ArgumentParser(description="MTR-OTA Web Code Studio & Silent Background Compiler")
+    parser.add_argument("--port", type=int, default=8080, help="Local HTTP port (default: 8080)")
     parser.add_argument("--host", default=ota_flash.DEFAULT_HOST, help=f"ESP32 IP (default: {ota_flash.DEFAULT_HOST})")
     parser.add_argument("--fqbn", default=ota_flash.DEFAULT_FQBN, help=f"Board FQBN (default: {ota_flash.DEFAULT_FQBN})")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open browser")
+    parser.add_argument("--install-startup", action="store_true", help="Install & start silent Windows background compiler")
+    parser.add_argument("--uninstall-startup", action="store_true", help="Stop & remove silent Windows background compiler")
     args = parser.parse_args(argv)
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), make_studio_handler(args.host, args.fqbn))
+    if args.install_startup:
+        vbs = install_background_compiler_startup(port=args.port, start_now=True)
+        print(f"Installed silent background compiler -> {vbs}")
+        print(f"Running silently on http://127.0.0.1:{args.port} (no terminal window needed!).")
+        return 0
+
+    if args.uninstall_startup:
+        removed = uninstall_background_compiler_startup(port=args.port)
+        print("Stopped background compiler and removed Startup entry." if removed else "Stopped background compiler (no Startup entry found).")
+        return 0
+
     url = f"http://127.0.0.1:{args.port}"
+    if is_studio_running(args.port):
+        print(f"MTR-OTA background compiler is already running at {url}.")
+        if not args.no_browser:
+            webbrowser.open(url)
+        return 0
+
+    server_ref: list = []
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", args.port), make_studio_handler(args.host, args.fqbn, server_ref)
+    )
+    server_ref.append(server)
+
     print("============================================================")
     print(f"  MTR-OTA Web Code Studio running at: {url}")
     print(f"  Target ESP32: http://{args.host}")
-    print("  Keep this window open while flashing code from the browser.")
     print("  Press Ctrl+C to stop.")
     print("============================================================")
 
     if not args.no_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
 
     try:
         server.serve_forever()

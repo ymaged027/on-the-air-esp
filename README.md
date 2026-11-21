@@ -55,10 +55,10 @@ Power on your ESP32 and connect Wi-Fi to **`MTR-OTA`** (password: **`mtr-ota007`
 
 1. **Direct Inside Arduino IDE:** Select **Tools → Port → `MTR-OTA at 192.168.4.1`** → click **Upload (→)** → password **`mtr-ota007`**.
 2. **1-Click `flash.bat` (Windows):** Double-click **`flash.bat`** to compile & flash the starter sketch — or **drag & drop ANY `.ino` file onto `flash.bat`**!
-3. **Web Portal + Browser Code Window (`web-ide.bat` or `http://192.168.4.1`):**
-   - Double-click **`web-ide.bat`** to open the full Web Portal at **`http://127.0.0.1:8080`** (and enable 1-click **Compile & Flash** inside `http://192.168.4.1` too!).
-   - Paste or edit Arduino C++ code directly in the browser **Code Window** and click **Compile & Flash to ESP32** (automatically keeps `OnTheAirESP.begin()` included so you never lose OTA!).
-   - Also includes live **OTA Monitor**, live NVS parameter tuning, drag-and-drop `.bin` flashing, and 1-click Rollback.
+3. **Web Portal + `.ino` Upload & Code Window (`http://192.168.4.1` or `http://127.0.0.1:8080`):**
+   - Run **`install-background-compiler.bat`** once so the compiler runs **invisibly in the background at Windows login** (no terminal window, no need to ever open `web-ide.bat` again! Remove anytime with `uninstall-background-compiler.bat`).
+   - Drag & drop any **`.ino`** file or **`.bin`** file, or paste Arduino C++ code directly in the **Code Window**, and click **Compile & Flash to ESP32** (automatically keeps `OnTheAirESP.begin()` included so you never lose OTA!).
+   - Also includes live **OTA Monitor**, live NVS parameter tuning, and 1-click Rollback.
 
 ---
 

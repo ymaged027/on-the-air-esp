@@ -286,6 +286,7 @@ class OtaFlashTests(unittest.TestCase):
         html = ota_studio.extract_web_ui_html()
         self.assertIn("Code Window", html)
         self.assertIn("OTA Monitor", html)
+        self.assertIn('accept=".bin,.ino"', html)
 
         plain = "void setup() {\n  pinMode(2, OUTPUT);\n}\nvoid loop() {}\n"
         injected = ota_studio.ensure_ota_included(plain)
@@ -294,6 +295,13 @@ class OtaFlashTests(unittest.TestCase):
 
         already = "#include <OnTheAirESP.h>\nvoid setup() { OnTheAirESP.begin(); }\nvoid loop() {}\n"
         self.assertEqual(ota_studio.ensure_ota_included(already), already)
+
+        with tempfile.TemporaryDirectory() as td:
+            vbs = ota_studio.install_background_compiler_startup(startup_dir=Path(td), start_now=False)
+            self.assertTrue(vbs.is_file())
+            self.assertIn("ota_studio.py", vbs.read_text(encoding="utf-8"))
+            self.assertTrue(ota_studio.uninstall_background_compiler_startup(startup_dir=Path(td)))
+            self.assertFalse(vbs.is_file())
 
 
 if __name__ == "__main__":
