@@ -17,6 +17,7 @@ public:
              DisarmCallback disarmFn,
              IsArmedCallback isArmedFn);
 
+  bool isRecoverySwitchActive() const;
   bool shouldEnterMaintenanceMode();
   void disableRadiosForRunMode();
   void startMaintenanceMode();

@@ -7,9 +7,9 @@
 #include "ota_monitor.h"
 
 // =============================================================================
-// OnTheAirESP — 1-Line Plug-and-Play OTA + OTA Monitor for ESP32 NodeMCU-32S
+// OnTheAirESP — 1-Line, Zero-Button OTA + OTA Monitor for ESP32 NodeMCU-32S
 // =============================================================================
-// Minimal usage (literally ONE line!):
+// Minimal usage (NO buttons to press ever!):
 //   #include <OnTheAirESP.h>
 //
 //   void setup() {
@@ -19,12 +19,15 @@
 //
 //   void loop() {
 //     // your normal loop() code...
+//     // Print wirelessly anytime: OtaMonitor.println("hello!");
 //   }
 //
-// Wireless debugging tip:
-//   Call OnTheAirESP.enableDebugMode() BEFORE begin() and print with
-//   OtaMonitor.println("...") to stream live logs over Wi-Fi into both
-//   Arduino IDE's Serial Monitor AND the Web OTA Monitor (http://192.168.4.1)!
+// By default (OTA_ALWAYS_ON = true), MTR-OTA Wi-Fi, wireless flashing, and
+// OTA Monitor run automatically in the background on Core 0 while your sketch
+// runs at full speed on Core 1 — zero button pressing required!
+//
+// Need Wi-Fi completely OFF during a strict RF-off run?
+//   Call OnTheAirESP.setAlwaysOn(false); before begin().
 // =============================================================================
 
 class OnTheAirEspFacade {
@@ -34,10 +37,12 @@ public:
   void setDisarmCallback(DisarmCallback fn);
   void setArmedCallback(IsArmedCallback fn);
 
-  // Optional: keep MTR-OTA Wi-Fi + OTA Monitor + wireless flashing running
-  // alongside your own setup()/loop() for live wireless debugging (call handle() in loop).
-  // Default is false (Wi-Fi & Bluetooth 100% OFF in Normal Run Mode).
-  void enableDebugMode(bool enabled = true) { debugMode_ = enabled; }
+  // true (default): Always-On OTA + OTA Monitor on Core 0 — no BOOT button needed!
+  // false         : Wi-Fi 100% OFF in Normal Run Mode unless BOOT / GPIO 33 is triggered.
+  void setAlwaysOn(bool enabled) { alwaysOn_ = enabled; }
+
+  // Alias kept for backwards compatibility.
+  void enableDebugMode(bool enabled = true) { alwaysOn_ = enabled; }
 
   void begin(unsigned long serialBaud = 115200, bool blockInOtaMode = true);
   bool handle();
@@ -54,7 +59,7 @@ private:
   OtaManager     ota_;
   DisarmCallback disarmFn_   = nullptr;
   IsArmedCallback isArmedFn_ = nullptr;
-  bool           debugMode_  = false;
+  bool           alwaysOn_   = OTA_ALWAYS_ON;
 };
 
 extern OnTheAirEspFacade OnTheAirESP;

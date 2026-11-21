@@ -1,17 +1,44 @@
 #include "OnTheAirESP.h"
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 OnTheAirEspFacade OnTheAirESP;
 
 namespace {
 esp_timer_handle_t g_rollbackTimer = nullptr;
+TaskHandle_t       g_otaBgTask     = nullptr;
 
 void rollbackTimerCallback(void* arg) {
   auto* mgr = static_cast<OtaManager*>(arg);
   if (mgr) {
     mgr->confirmRollbackNow();
   }
+}
+
+void otaBackgroundTask(void* arg) {
+  auto* mgr = static_cast<OtaManager*>(arg);
+  for (;;) {
+    if (mgr) {
+      mgr->handleClient();
+    }
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+
+void startBackgroundOtaTask(OtaManager* mgr) {
+  if (g_otaBgTask != nullptr) return;
+  // Pin OTA HTTP/mDNS/ArduinoOTA/Monitor server to Core 0 (alongside Wi-Fi stack)
+  // so user setup()/loop() on Core 1 run smoothly without calling handle() or pressing BOOT!
+  xTaskCreatePinnedToCore(
+      otaBackgroundTask,
+      "ota_bg",
+      8192,
+      mgr,
+      1,
+      &g_otaBgTask,
+      0);
 }
 
 void initWatchdog() {
@@ -37,6 +64,8 @@ void scheduleBackgroundRollbackConfirm(OtaManager* mgr) {
   args.arg      = mgr;
   args.name     = "ota_confirm";
   if (esp_timer_create(&args, &g_rollbackTimer) == ESP_OK) {
+    // Fires strictly AFTER WDT_TIMEOUT_SEC (12s > 10s) so any crash or infinite
+    // loop in setup()/loop() triggers WDT reboot + automatic rollback FIRST!
     const uint64_t delayUs = (uint64_t)(WDT_TIMEOUT_SEC + 2) * 1000000ULL;
     esp_timer_start_once(g_rollbackTimer, delayUs);
   }
@@ -82,6 +111,34 @@ void OnTheAirEspFacade::begin(unsigned long serialBaud, bool blockInOtaMode) {
   ota_.begin(&params_, &paramsStore_, disarmFn_, isArmedFn_);
   OtaMonitor.printf("[OTA] Boot state: %s\n", ota_.getOtaStateString());
 
+  // 1. Physical GPIO 33 recovery switch always enters isolated Safe Maintenance Mode
+  if (ota_.isRecoverySwitchActive()) {
+    OtaMonitor.println(F("[OTA] Recovery switch ACTIVE -> Safe Maintenance Mode (user sketch paused)."));
+    ota_.startMaintenanceMode();
+    if (blockInOtaMode) {
+      for (;;) {
+        feedLoopWDT();
+        ota_.serviceRollbackConfirmation();
+        ota_.handleClient();
+        delay(2);
+      }
+    }
+    return;
+  }
+
+  // 2. Always-On Mode (default): ZERO buttons needed!
+  //    Starts MTR-OTA Wi-Fi, wireless flashing & OTA Monitor on Core 0 immediately,
+  //    then returns straight into your setup() & loop() on Core 1.
+  if (alwaysOn_) {
+    OtaMonitor.println(F("[OTA] Always-On Mode: MTR-OTA & OTA Monitor active on Core 0 (no buttons needed!)."));
+    ota_.startWirelessServices(false);
+    startBackgroundOtaTask(&ota_);
+    scheduleBackgroundRollbackConfirm(&ota_);
+    return;
+  }
+
+  // 3. Strict RF-Off Mode (opt-in via setAlwaysOn(false)):
+  //    Wi-Fi stays 100% OFF unless BOOT is held during the boot window.
   if (ota_.shouldEnterMaintenanceMode()) {
     ota_.startMaintenanceMode();
     if (blockInOtaMode) {
@@ -92,11 +149,6 @@ void OnTheAirEspFacade::begin(unsigned long serialBaud, bool blockInOtaMode) {
         delay(2);
       }
     }
-  } else if (debugMode_) {
-    OtaMonitor.println(F("[OTA] Debug Mode: Wi-Fi + OTA Monitor active alongside user sketch."));
-    ota_.startWirelessServices(false);
-    digitalWrite(PIN_STATUS_LED, HIGH);
-    scheduleBackgroundRollbackConfirm(&ota_);
   } else {
     ota_.disableRadiosForRunMode();
     digitalWrite(PIN_STATUS_LED, HIGH);
@@ -108,7 +160,8 @@ bool OnTheAirEspFacade::handle() {
   feedLoopWDT();
   ota_.serviceRollbackConfirmation();
 
-  if (ota_.isWirelessActive()) {
+  // Only service inline when no background Core 0 task is running
+  if (g_otaBgTask == nullptr && ota_.isWirelessActive()) {
     ota_.handleClient();
   }
   return ota_.isMaintenanceActive();

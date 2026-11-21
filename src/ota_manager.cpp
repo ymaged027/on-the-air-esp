@@ -27,6 +27,12 @@ WebServer g_server(80);
 DNSServer g_dnsServer;
 OtaManager* g_instance = nullptr;
 
+inline void safeFeedWdt() {
+  if (esp_task_wdt_status(NULL) == ESP_OK) {
+    esp_task_wdt_reset();
+  }
+}
+
 String jsonEscape(const String& in) {
   String out;
   out.reserve(in.length() + 16);
@@ -94,13 +100,18 @@ void OtaManager::begin(AppParams* params,
   }
 }
 
-bool OtaManager::shouldEnterMaintenanceMode() {
+bool OtaManager::isRecoverySwitchActive() const {
   if (digitalRead(PIN_OTA_SWITCH) == LOW) {
     delay(25);
-    if (digitalRead(PIN_OTA_SWITCH) == LOW) {
-      OtaMonitor.println(F("[OTA] OTA switch ACTIVE -> Maintenance Mode"));
-      return true;
-    }
+    return digitalRead(PIN_OTA_SWITCH) == LOW;
+  }
+  return false;
+}
+
+bool OtaManager::shouldEnterMaintenanceMode() {
+  if (isRecoverySwitchActive()) {
+    OtaMonitor.println(F("[OTA] Recovery switch (GPIO 33) ACTIVE -> Safe Maintenance Mode"));
+    return true;
   }
 
 #if BOOT_WINDOW_MS > 0
@@ -110,7 +121,7 @@ bool OtaManager::shouldEnterMaintenanceMode() {
   uint32_t heldSince = 0;
 
   while (millis() - start < BOOT_WINDOW_MS) {
-    esp_task_wdt_reset();
+    safeFeedWdt();
     digitalWrite(PIN_STATUS_LED, ((millis() / 100) % 2) == 0 ? HIGH : LOW);
 
     if (digitalRead(PIN_BOOT_BTN) == LOW) {
@@ -161,7 +172,7 @@ void OtaManager::startWirelessServices(bool disarmOutputs) {
   WiFi.begin(OTA_STA_SSID, OTA_STA_PASS);
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - t0) < OTA_STA_TIMEOUT_MS) {
-    esp_task_wdt_reset();
+    safeFeedWdt();
     delay(200);
   }
   if (WiFi.status() == WL_CONNECTED) {
@@ -208,8 +219,9 @@ void OtaManager::startArduinoOta() {
   });
 
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    esp_task_wdt_reset();
+    safeFeedWdt();
     digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
+    vTaskDelay(1);
     (void)progress;
     (void)total;
   });
@@ -548,8 +560,9 @@ void OtaManager::handleOtaUpload() {
     otaAuthorized_ = true;
 
   } else if (upload.status == UPLOAD_FILE_WRITE) {
-    esp_task_wdt_reset();
+    safeFeedWdt();
     digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
+    vTaskDelay(1);
 
     if (!otaAuthorized_) return;
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
@@ -560,7 +573,7 @@ void OtaManager::handleOtaUpload() {
     }
 
   } else if (upload.status == UPLOAD_FILE_END) {
-    esp_task_wdt_reset();
+    safeFeedWdt();
     if (!otaAuthorized_) return;
 
     if (Update.end(true)) {

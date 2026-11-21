@@ -49,13 +49,15 @@ void loop() {
 
 ---
 
-## Flash Wirelessly Anytime (3 Effortless Ways)
+## Flash Wirelessly Anytime — Zero Buttons to Press!
 
-Enter **Maintenance Mode** (press **`BOOT`** right after power-on while the blue LED fast-blinks, *or* close a switch/jumper on `GPIO 33 → GND`) and connect Wi-Fi to **`MTR-OTA`** (password: **`mtr-ota007`**):
+Power on your ESP32 and connect Wi-Fi to **`MTR-OTA`** (password: **`mtr-ota007`**). Because **Always-On Mode** runs `MTR-OTA`, wireless flashing, and **OTA Monitor** in the background on **Core 0** while your sketch runs on **Core 1**, you **never have to press `BOOT` or `EN`** between uploads!
 
 1. **Direct Inside Arduino IDE:** Select **Tools → Port → `MTR-OTA at 192.168.4.1`** → click **Upload (→)** → password **`mtr-ota007`**.
 2. **1-Click `flash.bat` (Windows):** Double-click **`flash.bat`** to compile & flash the starter sketch — or **drag & drop ANY `.ino` file onto `flash.bat`**!
 3. **Phone or Browser (Auto-Popup Captive Portal):** Connecting to `MTR-OTA` pops open the Web Console (`http://192.168.4.1`, or double-click `open-console.bat`) with live **OTA Monitor**, 2-second NVS parameter tuning, drag-and-drop `.bin` flashing, and 1-click Rollback.
+
+*(Need Wi-Fi 100% OFF for an RF-strict competition? Call `OnTheAirESP.setAlwaysOn(false);` before `OnTheAirESP.begin();`, or wire a Safe Recovery switch to `GPIO 33 → GND` to boot into isolated OTA-only mode.)*
 
 ---
 

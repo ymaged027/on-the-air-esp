@@ -13,16 +13,38 @@ OtaMonitorClass::OtaMonitorClass() {
   memset(ring_, 0, sizeof(ring_));
 }
 
+void OtaMonitorClass::ensureMutex() const {
+  if (!mutex_) {
+    mutex_ = xSemaphoreCreateRecursiveMutex();
+  }
+}
+
+void OtaMonitorClass::lock() const {
+  ensureMutex();
+  if (mutex_) {
+    xSemaphoreTakeRecursive(mutex_, portMAX_DELAY);
+  }
+}
+
+void OtaMonitorClass::unlock() const {
+  if (mutex_) {
+    xSemaphoreGiveRecursive(mutex_);
+  }
+}
+
 void OtaMonitorClass::beginServer(uint16_t port) {
+  lock();
   stopServer();
   port_ = port;
   g_monServer = new WiFiServer(port_);
   g_monServer->begin();
   g_monServer->setNoDelay(true);
   serverRunning_ = true;
+  unlock();
 }
 
 void OtaMonitorClass::stopServer() {
+  lock();
   for (uint8_t i = 0; i < MAX_TCP_CLIENTS; ++i) {
     if (g_clients[i]) {
       g_clients[i].stop();
@@ -35,6 +57,7 @@ void OtaMonitorClass::stopServer() {
     g_monServer = nullptr;
   }
   serverRunning_ = false;
+  unlock();
 }
 
 void OtaMonitorClass::appendToRing(uint8_t b) {
@@ -58,56 +81,60 @@ void OtaMonitorClass::replayRingToClient(uint8_t idx) {
 }
 
 void OtaMonitorClass::handle() {
-  if (!serverRunning_ || !g_monServer) return;
+  String linesToDispatch[4];
+  uint8_t lineCount = 0;
 
-  // Accept incoming OTA Monitor TCP connections (e.g., Arduino IDE Monitor)
-  if (g_monServer->hasClient()) {
-    WiFiClient incoming = g_monServer->available();
-    bool placed = false;
-    for (uint8_t i = 0; i < MAX_TCP_CLIENTS; ++i) {
-      if (!g_clients[i] || !g_clients[i].connected()) {
-        if (g_clients[i]) g_clients[i].stop();
-        g_clients[i] = incoming;
-        g_clients[i].setNoDelay(true);
-        clientRx_[i] = "";
-        g_clients[i].println(F("--- Connected to OTA Monitor (type 'help' for commands) ---"));
-        replayRingToClient(i);
-        placed = true;
-        break;
+  lock();
+  if (serverRunning_ && g_monServer) {
+    if (g_monServer->hasClient()) {
+      WiFiClient incoming = g_monServer->available();
+      uint8_t slot = 0;
+      bool placed = false;
+      for (uint8_t i = 0; i < MAX_TCP_CLIENTS; ++i) {
+        if (!g_clients[i] || !g_clients[i].connected()) {
+          slot = i;
+          placed = true;
+          break;
+        }
       }
+      if (!placed) {
+        slot = 0;
+      }
+      if (g_clients[slot]) g_clients[slot].stop();
+      g_clients[slot] = incoming;
+      g_clients[slot].setNoDelay(true);
+      clientRx_[slot] = "";
+      g_clients[slot].println(F("--- Connected to OTA Monitor (type 'help' for commands) ---"));
+      replayRingToClient(slot);
     }
-    if (!placed) {
-      // Replace oldest client if all slots full
-      g_clients[0].stop();
-      g_clients[0] = incoming;
-      g_clients[0].setNoDelay(true);
-      clientRx_[0] = "";
-      g_clients[0].println(F("--- Connected to OTA Monitor (type 'help' for commands) ---"));
-      replayRingToClient(0);
+
+    for (uint8_t i = 0; i < MAX_TCP_CLIENTS; ++i) {
+      if (!g_clients[i] || !g_clients[i].connected()) continue;
+      while (g_clients[i].available()) {
+        char c = (char)g_clients[i].read();
+        if (c == '\r') continue;
+        if (c == '\n') {
+          String line = clientRx_[i];
+          clientRx_[i] = "";
+          line.trim();
+          if (line.length() > 0 && lineCount < 4) {
+            linesToDispatch[lineCount++] = line;
+          }
+        } else if (clientRx_[i].length() < 128) {
+          clientRx_[i] += c;
+        }
+      }
     }
   }
+  unlock();
 
-  // Read incoming lines typed in Arduino IDE Monitor / TCP terminal
-  for (uint8_t i = 0; i < MAX_TCP_CLIENTS; ++i) {
-    if (!g_clients[i] || !g_clients[i].connected()) continue;
-    while (g_clients[i].available()) {
-      char c = (char)g_clients[i].read();
-      if (c == '\r') continue;
-      if (c == '\n') {
-        String line = clientRx_[i];
-        clientRx_[i] = "";
-        line.trim();
-        if (line.length() > 0) {
-          dispatchLine(line);
-        }
-      } else if (clientRx_[i].length() < 128) {
-        clientRx_[i] += c;
-      }
-    }
+  for (uint8_t i = 0; i < lineCount; ++i) {
+    dispatchLine(linesToDispatch[i]);
   }
 }
 
 size_t OtaMonitorClass::write(uint8_t b) {
+  lock();
   Serial.write(b);
   appendToRing(b);
   if (serverRunning_) {
@@ -117,11 +144,13 @@ size_t OtaMonitorClass::write(uint8_t b) {
       }
     }
   }
+  unlock();
   return 1;
 }
 
 size_t OtaMonitorClass::write(const uint8_t* buffer, size_t size) {
   if (!buffer || size == 0) return 0;
+  lock();
   Serial.write(buffer, size);
   for (size_t i = 0; i < size; ++i) {
     appendToRing(buffer[i]);
@@ -133,17 +162,22 @@ size_t OtaMonitorClass::write(const uint8_t* buffer, size_t size) {
       }
     }
   }
+  unlock();
   return size;
 }
 
 void OtaMonitorClass::clearBuffer() {
+  lock();
   memset(ring_, 0, sizeof(ring_));
   totalBytes_ = 0;
+  unlock();
 }
 
 String OtaMonitorClass::readLogChunk(uint32_t sinceOffset, uint32_t& nextOffset) const {
+  lock();
   nextOffset = totalBytes_;
   if (totalBytes_ == 0 || sinceOffset >= totalBytes_) {
+    unlock();
     return "";
   }
 
@@ -159,6 +193,7 @@ String OtaMonitorClass::readLogChunk(uint32_t sinceOffset, uint32_t& nextOffset)
     char c = (char)ring_[(sinceOffset + i) % OTA_MONITOR_BUF_SIZE];
     if (c != '\0') out += c;
   }
+  unlock();
   return out;
 }
 
@@ -172,17 +207,25 @@ void OtaMonitorClass::injectCommand(const String& line) {
 
 void OtaMonitorClass::dispatchLine(const String& rawLine) {
   printf("> %s\n", rawLine.c_str());
+  lock();
   pendingLine_    = rawLine;
   hasPendingLine_ = true;
-  if (cmdCallback_) {
-    cmdCallback_(rawLine);
+  MonitorCommandCallback cb = cmdCallback_;
+  unlock();
+  if (cb) {
+    cb(rawLine);
   }
 }
 
 String OtaMonitorClass::readLine() {
-  if (!hasPendingLine_) return "";
+  lock();
+  if (!hasPendingLine_) {
+    unlock();
+    return "";
+  }
   hasPendingLine_ = false;
   String out = pendingLine_;
   pendingLine_ = "";
+  unlock();
   return out;
 }

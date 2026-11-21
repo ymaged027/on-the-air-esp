@@ -33,16 +33,21 @@
 #define OTA_STA_PASS       "changeme123"
 #define OTA_STA_TIMEOUT_MS 8000
 
-// --- 3. Hardware Pins (ESP32 NodeMCU-32S) ------------------------------------
+// --- 3. Operating Mode & Hardware Pins (ESP32 NodeMCU-32S) -------------------
+// true  (default): ZERO buttons needed! MTR-OTA Wi-Fi, wireless upload, and
+//                  OTA Monitor stay active in the background on Core 0 while
+//                  your setup()/loop() run normally on Core 1.
+// false          : Strict RF-Off mode (Wi-Fi stays OFF unless GPIO 33 switch
+//                  is closed or BOOT is pressed during BOOT_WINDOW_MS).
+#define OTA_ALWAYS_ON      true
+
 #define PIN_STATUS_LED     2    // Built-in blue LED on NodeMCU-32S (active HIGH)
 
-// Maintenance / OTA Mode Switch: wire a switch or jumper from GPIO 33 to GND.
-//   Closed (LOW) at boot -> Maintenance Mode (Wi-Fi ON, outputs disarmed)
-//   Open  (HIGH) at boot -> Normal Run Mode  (Wi-Fi 100% OFF)
+// Safe Recovery / Maintenance Switch: wire a switch or jumper from GPIO 33 to GND.
+//   Closed (LOW) at boot -> Safe Recovery Mode (ONLY OTA runs; skips user sketch)
 #define PIN_OTA_SWITCH     33
 
-// Zero-wiring fallback: press onboard BOOT (GPIO 0) right AFTER power-on
-// during the 2.5s fast-blink window. Set to 0 when using a physical switch on GPIO 33.
+// Used only when OTA_ALWAYS_ON is false (or OnTheAirESP.setAlwaysOn(false)):
 #define PIN_BOOT_BTN       0
 #define BOOT_WINDOW_MS     2500
 
