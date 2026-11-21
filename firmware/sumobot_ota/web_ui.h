@@ -1,0 +1,279 @@
+#pragma once
+
+#include <Arduino.h>
+
+// Single-page Sumobot Pit Console stored in PROGMEM (zero SPIFFS/LittleFS upload required).
+static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sumobot OTA Pit Console</title>
+<style>
+  :root{--bg:#0d1117;--card:#161b22;--bd:#30363d;--tx:#e6edf3;--mut:#8b949e;--acc:#58a6ff;--ok:#3fb950;--warn:#d29922;--err:#f85149}
+  *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--tx);padding:16px}
+  .wrap{max-width:760px;margin:0 auto}
+  h1{margin:0 0 4px;font-size:1.35rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .sub{color:var(--mut);font-size:.88rem;margin:0 0 16px}
+  .badge{font-size:.74rem;padding:3px 8px;border-radius:999px;font-weight:600;border:1px solid var(--bd)}
+  .b-ok{background:#12261e;color:var(--ok);border-color:#238636}
+  .b-warn{background:#2d220a;color:var(--warn);border-color:#9e6a03}
+  .b-err{background:#2d1215;color:var(--err);border-color:#da3633}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:14px}
+  .card h2{margin:0 0 12px;font-size:1.02rem}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}
+  .kv{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px}
+  .kv .k{color:var(--mut);font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
+  .kv .v{font-size:1.02rem;font-weight:600;margin-top:3px;word-break:break-all}
+  label{display:block;font-size:.84rem;color:var(--mut);margin-bottom:4px}
+  input,select{width:100%;padding:8px 10px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:7px;font-size:.92rem}
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px}
+  .btn{background:var(--acc);color:#0d1117;border:none;border-radius:7px;padding:9px 14px;font-weight:700;cursor:pointer;font-size:.9rem}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn-sec{background:#21262d;color:var(--tx);border:1px solid var(--bd)}
+  .btn-warn{background:var(--warn);color:#0d1117}
+  .btn-err{background:var(--err);color:#fff}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .drop{border:2px dashed var(--bd);border-radius:10px;padding:18px;text-align:center;margin:10px 0;background:var(--bg)}
+  .drop.over{border-color:var(--acc)}
+  .bar-bg{height:12px;background:var(--bg);border:1px solid var(--bd);border-radius:999px;overflow:hidden;margin-top:10px;display:none}
+  .bar{height:100%;width:0;background:var(--acc);transition:width .15s}
+  .msg{margin-top:10px;font-size:.88rem;padding:9px 11px;border-radius:7px;display:none}
+  .msg.ok{display:block;background:#12261e;color:var(--ok);border:1px solid #238636}
+  .msg.err{display:block;background:#2d1215;color:var(--err);border:1px solid #da3633}
+  .msg.info{display:block;background:#0c2d6b;color:#79c0ff;border:1px solid #1f6feb}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>
+    <span id="titleId">Sumobot</span>
+    <span class="badge b-ok" id="badgeArmed">DISARMED</span>
+    <span class="badge b-warn" id="badgeOta">CHECKING...</span>
+  </h1>
+  <p class="sub">ESP32 NodeMCU-32S Wireless Pit Console &bull; Wi-Fi active in Maintenance Mode only</p>
+
+  <div class="card">
+    <h2>Robot Telemetry</h2>
+    <div class="grid">
+      <div class="kv"><div class="k">Firmware</div><div class="v" id="stVer">-</div></div>
+      <div class="kv"><div class="k">Active Slot</div><div class="v" id="stPart">-</div></div>
+      <div class="kv"><div class="k">OTA State</div><div class="v" id="stState">-</div></div>
+      <div class="kv"><div class="k">Battery</div><div class="v" id="stBatt">-</div></div>
+      <div class="kv"><div class="k">Free Heap</div><div class="v" id="stHeap">-</div></div>
+      <div class="kv"><div class="k">Uptime</div><div class="v" id="stUp">-</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Security Token</h2>
+    <label for="token">Pit Auth Token (required for Flash, Save Params, Rollback)</label>
+    <input id="token" type="password" placeholder="Enter OTA_AUTH_TOKEN from config.h">
+  </div>
+
+  <div class="card">
+    <h2>Over-The-Air Firmware Flash (.bin)</h2>
+    <div class="drop" id="dropZone">
+      <div style="margin-bottom:8px;color:var(--mut)">Export from Arduino IDE: <b>Sketch &rarr; Export Compiled Binary</b></div>
+      <input id="binFile" type="file" accept=".bin">
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnFlash">Flash Firmware</button>
+    </div>
+    <div class="bar-bg" id="barBg"><div class="bar" id="bar"></div></div>
+    <div class="msg" id="otaMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Live Parameter Tuning (NVS Flash &mdash; No Recompile!)</h2>
+    <div class="row">
+      <div><label>Search Speed (0-255)</label><input id="pSearch" type="number" min="0" max="255"></div>
+      <div><label>Attack Speed (0-255)</label><input id="pAttack" type="number" min="0" max="255"></div>
+      <div><label>Turn Speed (0-255)</label><input id="pTurn" type="number" min="0" max="255"></div>
+    </div>
+    <div class="row">
+      <div><label>Line Threshold (0-4095)</label><input id="pLine" type="number" min="0" max="4095"></div>
+      <div><label>Opponent Dist (5-150 cm)</label><input id="pDist" type="number" min="5" max="150"></div>
+      <div><label>Start Delay (0-10000 ms)</label><input id="pDelay" type="number" min="0" max="10000"></div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Match Strategy</label>
+        <select id="pStrat">
+          <option value="0">0 - Direct Attack</option>
+          <option value="1">1 - Circle Search</option>
+          <option value="2">2 - Wait &amp; Counter</option>
+          <option value="3">3 - Side Rush</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveParams">Save to Flash</button>
+      <button class="btn btn-sec" id="btnResetParams">Reset Defaults</button>
+    </div>
+    <div class="msg" id="paramMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recovery &amp; Control</h2>
+    <div class="actions">
+      <button class="btn btn-warn" id="btnRollback">Rollback to Previous Firmware</button>
+      <button class="btn btn-sec" id="btnReboot">Reboot Robot</button>
+    </div>
+    <div class="msg" id="ctlMsg"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let robotId = "";
+
+function showMsg(el, cls, txt) {
+  el.className = "msg " + cls;
+  el.textContent = txt;
+}
+
+function getToken() {
+  const t = $("token").value.trim();
+  localStorage.setItem("sumo_ota_token", t);
+  return t;
+}
+
+async function fetchStatus() {
+  try {
+    const r = await fetch("/api/status");
+    const d = await r.json();
+    robotId = d.robotId || "";
+    $("titleId").textContent = d.robotId + " (" + d.board + ")";
+    $("stVer").textContent = "v" + d.version;
+    $("stPart").textContent = d.partition;
+    $("stState").textContent = d.otaState;
+    $("stBatt").textContent = d.batteryMonitor ? (d.batteryV.toFixed(2) + " V") : "Disabled";
+    $("stHeap").textContent = Math.round(d.freeHeap / 1024) + " KB";
+    $("stUp").textContent = d.uptimeSec + " s";
+
+    const ba = $("badgeArmed");
+    ba.textContent = d.armed ? "ARMED (LOCKED)" : "DISARMED";
+    ba.className = "badge " + (d.armed ? "b-err" : "b-ok");
+
+    const bo = $("badgeOta");
+    bo.textContent = d.otaState;
+    bo.className = "badge " + (d.otaState === "VALID" ? "b-ok" : "b-warn");
+  } catch (e) {}
+}
+
+async function fetchParams() {
+  try {
+    const r = await fetch("/api/params");
+    const p = await r.json();
+    $("pSearch").value = p.searchSpeed;
+    $("pAttack").value = p.attackSpeed;
+    $("pTurn").value = p.turnSpeed;
+    $("pLine").value = p.lineThreshold;
+    $("pDist").value = p.opponentDistCm;
+    $("pDelay").value = p.startDelayMs;
+    $("pStrat").value = p.strategy;
+  } catch (e) {}
+}
+
+$("btnFlash").onclick = () => {
+  const file = $("binFile").files[0];
+  if (!file) return showMsg($("otaMsg"), "err", "Select a .bin firmware file first.");
+  if (!file.name.endsWith(".bin")) return showMsg($("otaMsg"), "err", "File must end with .bin");
+
+  const tok = getToken();
+  const fd = new FormData();
+  fd.append("firmware", file, file.name);
+
+  $("barBg").style.display = "block";
+  $("bar").style.width = "0%";
+  $("btnFlash").disabled = true;
+  showMsg($("otaMsg"), "info", "Uploading " + file.name + " (" + Math.round(file.size/1024) + " KB)...");
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/ota", true);
+  xhr.setRequestHeader("X-OTA-Token", tok);
+  if (robotId) xhr.setRequestHeader("X-Target-Robot", robotId);
+
+  xhr.upload.onprogress = e => {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      $("bar").style.width = pct + "%";
+    }
+  };
+  xhr.onload = () => {
+    $("btnFlash").disabled = false;
+    try {
+      const res = JSON.parse(xhr.responseText);
+      if (xhr.status === 200 && res.ok) {
+        $("bar").style.width = "100%";
+        showMsg($("otaMsg"), "ok", "Flash OK! Rebooting into new partition... Reconnect in ~5s.");
+      } else {
+        showMsg($("otaMsg"), "err", "Flash rejected: " + (res.error || xhr.statusText));
+      }
+    } catch {
+      showMsg($("otaMsg"), "err", "Upload error (HTTP " + xhr.status + ")");
+    }
+  };
+  xhr.onerror = () => {
+    $("btnFlash").disabled = false;
+    showMsg($("otaMsg"), "err", "Connection lost during upload.");
+  };
+  xhr.send(fd);
+};
+
+$("btnSaveParams").onclick = async () => {
+  const body = new URLSearchParams({
+    searchSpeed: $("pSearch").value,
+    attackSpeed: $("pAttack").value,
+    turnSpeed: $("pTurn").value,
+    lineThreshold: $("pLine").value,
+    opponentDistCm: $("pDist").value,
+    startDelayMs: $("pDelay").value,
+    strategy: $("pStrat").value
+  });
+  const r = await fetch("/api/params", {
+    method: "POST",
+    headers: {"X-OTA-Token": getToken(), "Content-Type": "application/x-www-form-urlencoded"},
+    body
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.ok) showMsg($("paramMsg"), "ok", "Parameters saved to NVS flash!");
+  else showMsg($("paramMsg"), "err", "Failed: " + (d.error || r.status));
+};
+
+$("btnResetParams").onclick = async () => {
+  const r = await fetch("/api/params/reset", {method: "POST", headers: {"X-OTA-Token": getToken()}});
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.ok) {
+    showMsg($("paramMsg"), "ok", "Parameters reset to defaults.");
+    fetchParams();
+  } else {
+    showMsg($("paramMsg"), "err", "Failed: " + (d.error || r.status));
+  }
+};
+
+$("btnRollback").onclick = async () => {
+  if (!confirm("Roll back to the previous OTA partition and reboot?")) return;
+  const r = await fetch("/api/rollback", {method: "POST", headers: {"X-OTA-Token": getToken()}});
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.ok) showMsg($("ctlMsg"), "ok", "Rolling back and rebooting...");
+  else showMsg($("ctlMsg"), "err", "Rollback failed: " + (d.error || r.status));
+};
+
+$("btnReboot").onclick = async () => {
+  const r = await fetch("/api/reboot", {method: "POST", headers: {"X-OTA-Token": getToken()}});
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.ok) showMsg($("ctlMsg"), "info", "Rebooting...");
+  else showMsg($("ctlMsg"), "err", "Reboot failed: " + (d.error || r.status));
+};
+
+const savedTok = localStorage.getItem("sumo_ota_token");
+if (savedTok) $("token").value = savedTok;
+fetchStatus();
+fetchParams();
+setInterval(fetchStatus, 2500);
+</script>
+</body>
+</html>)rawliteral";

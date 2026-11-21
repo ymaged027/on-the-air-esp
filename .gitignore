@@ -1,0 +1,23 @@
+# Arduino IDE build artifacts
+*.bin
+*.elf
+*.map
+*.hex
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*.swo
+
+# Local secrets (if you create a local override header)
+secrets.h
