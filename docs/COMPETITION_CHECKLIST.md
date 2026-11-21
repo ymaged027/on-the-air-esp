@@ -4,11 +4,11 @@
 
 Run these 4 tests on your bench before competition day so you trust the system under pressure:
 
-1. **First USB Flash:** Upload `firmware/sumobot_ota/sumobot_ota.ino` via USB once with Board = **NodeMCU-32S**.
+1. **First USB Flash:** Upload `firmware/on-the-air-esp/on-the-air-esp.ino` via USB once with Board = **NodeMCU-32S**.
 2. **Normal OTA Flash Test:**
    - Change `FW_VERSION` in `config.h` from `"1.0.0"` to `"1.0.1"`.
    - In Arduino IDE: **Sketch → Export Compiled Binary**.
-   - Boot Sumobot into Maintenance Mode → connect laptop/phone to `SUMO-01-OTA` → flash `sumobot_ota.ino.bin`.
+   - Boot Sumobot into Maintenance Mode → connect laptop/phone to `SUMO-01-OTA` → flash `on-the-air-esp.ino.bin`.
    - Confirm active slot switched (`app0` ↔ `app1`) and after 4 seconds `otaState` becomes `VALID`.
 3. **Intentional Brick / Auto-Rollback Test:**
    - Add `while (true) {}` (infinite loop) inside `setup()` right after `initWatchdog()`, export `.bin`, and OTA-flash it.
@@ -28,9 +28,9 @@ Run these 4 tests on your bench before competition day so you trust the system u
 4. **Quick tune (2 seconds, zero compile):** Open `http://192.168.4.1`, adjust speeds / thresholds / strategy, click **Save to Flash**.
 5. **Full code update (15 seconds):**
    - In Arduino IDE: bump `FW_VERSION`, click **Sketch → Export Compiled Binary**.
-   - Upload `sumobot_ota.ino.bin` via `http://192.168.4.1` OR run:
+   - Upload `on-the-air-esp.ino.bin` via `http://192.168.4.1` OR run:
      ```bash
-     python tools/sumo_flash.py flash firmware/sumobot_ota/build/esp32.esp32.nodemcu-32s/sumobot_ota.ino.bin --token YOUR_TOKEN
+     python tools/sumo_flash.py flash firmware/on-the-air-esp/build/esp32.esp32.nodemcu-32s/on-the-air-esp.ino.bin --token YOUR_TOKEN
      ```
 6. Wait 5 seconds until status shows `VALID`.
 7. **Flip Pit Switch OFF**, power-cycle robot, verify solid Match Mode LED, and place on the dohyo!

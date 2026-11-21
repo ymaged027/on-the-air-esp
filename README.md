@@ -21,8 +21,8 @@ Naive `ArduinoOTA` examples break easily at competitions (UDP/mDNS blocked by Wi
 ```text
 on-the-air-esp/
 ├── firmware/
-│   └── sumobot_ota/           # Open sumobot_ota.ino directly in Arduino IDE
-│       ├── sumobot_ota.ino    # Main sketch (Match Mode vs Maintenance Mode + WDT)
+│   └── on-the-air-esp/           # Open on-the-air-esp.ino directly in Arduino IDE
+│       ├── on-the-air-esp.ino    # Main sketch (Match Mode vs Maintenance Mode + WDT)
 │       ├── config.h           # Robot ID, version, pins, Wi-Fi creds & auth token
 │       ├── ota_manager.h/.cpp # HTTP OTA server, safety interlocks, auto-rollback
 │       ├── sumo_params.h/.cpp # Persistent NVS live-tunable Sumobot parameters
@@ -42,7 +42,7 @@ on-the-air-esp/
 
 ### 1. First-Time USB Setup
 1. Install the official **esp32** board package by Espressif in Arduino IDE Boards Manager.
-2. Open `firmware/sumobot_ota/sumobot_ota.ino` in Arduino IDE.
+2. Open `firmware/on-the-air-esp/on-the-air-esp.ino` in Arduino IDE.
 3. Edit `config.h`: set your `ROBOT_ID`, `OTA_AP_SSID`, `OTA_AP_PASS`, and `OTA_AUTH_TOKEN`.
 4. Select **Tools → Board → ESP32 Arduino → NodeMCU-32S** (uses the default 4 MB dual-OTA partition table automatically).
 5. Upload once over USB.
@@ -56,18 +56,18 @@ When the blue LED switches to a **slow heartbeat blink**, Maintenance Mode is ac
 
 ### 3. Flash Wirelessly (Browser or CLI)
 1. Connect your laptop or phone to Wi-Fi **`SUMO-01-OTA`**.
-2. In Arduino IDE, click **Sketch → Export Compiled Binary** (creates `sumobot_ota.ino.bin` inside the sketch's `build/` folder).
-3. **Option A — Web Console:** Open **`http://192.168.4.1`**, enter your auth token, pick `sumobot_ota.ino.bin`, and click **Flash Firmware**.
+2. In Arduino IDE, click **Sketch → Export Compiled Binary** (creates `on-the-air-esp.ino.bin` inside the sketch's `build/` folder).
+3. **Option A — Web Console:** Open **`http://192.168.4.1`**, enter your auth token, pick `on-the-air-esp.ino.bin`, and click **Flash Firmware**.
 4. **Option B — Python CLI (zero pip dependencies):**
    ```bash
    # Check robot telemetry & live params
    python tools/sumo_flash.py status --host 192.168.4.1
 
    # Inspect binary target tag & hashes offline
-   python tools/sumo_flash.py inspect path/to/sumobot_ota.ino.bin
+   python tools/sumo_flash.py inspect path/to/on-the-air-esp.ino.bin
 
    # Flash with automatic target-ID verification, MD5 check, and post-reboot confirmation
-   python tools/sumo_flash.py flash path/to/sumobot_ota.ino.bin --token sumo-pit-2026
+   python tools/sumo_flash.py flash path/to/on-the-air-esp.ino.bin --token sumo-pit-2026
 
    # Live-tune parameters in 1 second without reflashing
    python tools/sumo_flash.py params --token sumo-pit-2026 --set attackSpeed=245 strategy=1

@@ -103,7 +103,7 @@ class SumoFlashTests(unittest.TestCase):
         self.server.server_close()
 
     def _write_fake_bin(self, tmpdir: str, robot_id: str = "SUMO-01", version: str = "1.1.0") -> Path:
-        p = Path(tmpdir) / "sumobot_ota.ino.bin"
+        p = Path(tmpdir) / "on-the-air-esp.ino.bin"
         meta = f"SUMO_META:ID={robot_id};BOARD=NODEMCU-32S;VER={version};".encode("utf-8")
         # Valid ESP32 magic byte 0xE9 + padding >= 4096 bytes
         content = b"\xe9" + (b"\x00" * 4096) + meta + (b"\xff" * 256)
