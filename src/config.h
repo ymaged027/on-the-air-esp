@@ -58,6 +58,10 @@
 #define PIN_OUT_3          27
 #define PIN_OUT_4          14
 
-// --- 4. Watchdog & Automatic Anti-Brick Rollback -----------------------------
+// --- 4. OTA Monitor (Wireless Serial Monitor over Web + Arduino IDE) ---------
+#define OTA_MONITOR_PORT         23    // TCP port for Arduino IDE OTA Monitor & CLI
+#define OTA_MONITOR_BUF_SIZE     4096  // Ring buffer size (bytes) replayed on connect
+
+// --- 5. Watchdog & Automatic Anti-Brick Rollback -----------------------------
 #define WDT_TIMEOUT_SEC          10    // Reboot if firmware freezes for 10 seconds
 #define OTA_SELF_TEST_WINDOW_MS  4000  // Auto-confirm new firmware after 4s of stability

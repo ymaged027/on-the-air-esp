@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-// Single-page OTA Web Console stored in PROGMEM (auto-opens via Captive Portal).
+// Single-page Web Console + Live OTA Monitor stored in PROGMEM.
 static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,7 +13,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   :root{--bg:#0d1117;--card:#161b22;--bd:#30363d;--tx:#e6edf3;--mut:#8b949e;--acc:#58a6ff;--ok:#3fb950;--warn:#d29922;--err:#f85149}
   *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   body{margin:0;background:var(--bg);color:var(--tx);padding:16px}
-  .wrap{max-width:760px;margin:0 auto}
+  .wrap{max-width:780px;margin:0 auto}
   h1{margin:0 0 4px;font-size:1.35rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .sub{color:var(--mut);font-size:.88rem;margin:0 0 16px}
   .badge{font-size:.74rem;padding:3px 8px;border-radius:999px;font-weight:600;border:1px solid var(--bd)}
@@ -21,7 +21,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .b-warn{background:#2d220a;color:var(--warn);border-color:#9e6a03}
   .b-err{background:#2d1215;color:var(--err);border-color:#da3633}
   .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:14px}
-  .card h2{margin:0 0 12px;font-size:1.02rem}
+  .card h2{margin:0 0 12px;font-size:1.02rem;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
   .kv{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px}
   .kv .k{color:var(--mut);font-size:.73rem;text-transform:uppercase;letter-spacing:.04em}
@@ -29,8 +29,9 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   label{display:block;font-size:.84rem;color:var(--mut);margin-bottom:4px}
   input,select{width:100%;padding:8px 10px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:7px;font-size:.92rem}
   .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px}
-  .btn{background:var(--acc);color:#0d1117;border:none;border-radius:7px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:.92rem}
+  .btn{background:var(--acc);color:#0d1117;border:none;border-radius:7px;padding:9px 15px;font-weight:700;cursor:pointer;font-size:.9rem}
   .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn-sm{padding:5px 10px;font-size:.8rem}
   .btn-sec{background:#21262d;color:var(--tx);border:1px solid var(--bd)}
   .btn-warn{background:var(--warn);color:#0d1117}
   .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -43,6 +44,9 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .msg.ok{display:block;background:#12261e;color:var(--ok);border:1px solid #238636}
   .msg.err{display:block;background:#2d1215;color:var(--err);border:1px solid #da3633}
   .msg.info{display:block;background:#0c2d6b;color:#79c0ff;border:1px solid #1f6feb}
+  .term{background:#05070b;color:#7ee787;border:1px solid var(--bd);border-radius:8px;padding:12px;height:230px;overflow-y:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.83rem;line-height:1.42;white-space:pre-wrap;word-break:break-word;margin:0}
+  .cmd-row{display:flex;gap:8px;margin-top:8px}
+  .cmd-row input{flex:1;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 </style>
 </head>
 <body>
@@ -52,7 +56,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <span class="badge b-ok" id="badgeArmed">DISARMED</span>
     <span class="badge b-warn" id="badgeOta">CHECKING...</span>
   </h1>
-  <p class="sub">ESP32 NodeMCU-32S Wireless OTA Console &bull; Wi-Fi turns 100% OFF in Normal Run Mode</p>
+  <p class="sub">ESP32 NodeMCU-32S Wireless OTA Console &amp; OTA Monitor &bull; Wi-Fi turns 100% OFF in Normal Run Mode</p>
 
   <div class="card">
     <h2>Device Telemetry</h2>
@@ -63,6 +67,21 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       <div class="kv"><div class="k">Battery</div><div class="v" id="stBatt">-</div></div>
       <div class="kv"><div class="k">Free Heap</div><div class="v" id="stHeap">-</div></div>
       <div class="kv"><div class="k">Uptime</div><div class="v" id="stUp">-</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>
+      <span>OTA Monitor <span class="badge b-ok" id="monLive">LIVE</span></span>
+      <span style="display:flex;gap:6px">
+        <button class="btn btn-sec btn-sm" id="btnMonPause">Pause</button>
+        <button class="btn btn-sec btn-sm" id="btnMonClear">Clear</button>
+      </span>
+    </h2>
+    <pre class="term" id="monOut">Connecting to OTA Monitor...</pre>
+    <div class="cmd-row">
+      <input id="monCmd" type="text" placeholder="Type command (help, status, params, reboot, rollback)...">
+      <button class="btn" id="btnMonSend">Send</button>
     </div>
   </div>
 
@@ -131,6 +150,9 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 const $ = id => document.getElementById(id);
 let deviceId = "";
 let selectedFile = null;
+let monCursor = 0;
+let monPaused = false;
+let monFirst = true;
 
 function showMsg(el, cls, txt) {
   el.className = "msg " + cls;
@@ -163,6 +185,56 @@ dz.ondrop = e => {
   e.preventDefault();
   dz.classList.remove("over");
   if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+};
+
+async function pollLogs() {
+  if (monPaused) return;
+  try {
+    const r = await fetch("/api/logs?since=" + monCursor);
+    const d = await r.json();
+    if (!d.ok) return;
+    if (monFirst) { $("monOut").textContent = ""; monFirst = false; }
+    if (d.next < monCursor) { $("monOut").textContent = ""; monCursor = 0; }
+    if (d.data) {
+      const el = $("monOut");
+      el.textContent += d.data;
+      if (el.textContent.length > 20000) el.textContent = el.textContent.slice(-16000);
+      el.scrollTop = el.scrollHeight;
+    }
+    monCursor = d.next;
+    $("monLive").textContent = "LIVE";
+    $("monLive").className = "badge b-ok";
+  } catch (e) {
+    $("monLive").textContent = "OFFLINE";
+    $("monLive").className = "badge b-err";
+  }
+}
+
+async function sendMonCmd() {
+  const cmd = $("monCmd").value.trim();
+  if (!cmd) return;
+  $("monCmd").value = "";
+  await fetch("/api/logs/send", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: new URLSearchParams({cmd})
+  }).catch(() => {});
+  pollLogs();
+}
+
+$("btnMonSend").onclick = sendMonCmd;
+$("monCmd").onkeydown = e => { if (e.key === "Enter") sendMonCmd(); };
+$("btnMonPause").onclick = () => {
+  monPaused = !monPaused;
+  $("btnMonPause").textContent = monPaused ? "Resume" : "Pause";
+  $("monLive").textContent = monPaused ? "PAUSED" : "LIVE";
+  $("monLive").className = "badge " + (monPaused ? "b-warn" : "b-ok");
+  if (!monPaused) pollLogs();
+};
+$("btnMonClear").onclick = async () => {
+  await fetch("/api/logs/clear", {method: "POST"}).catch(() => {});
+  $("monOut").textContent = "";
+  monCursor = 0;
 };
 
 async function fetchStatus() {
@@ -320,7 +392,9 @@ const savedTok = localStorage.getItem("ota_auth_token");
 if (savedTok) $("token").value = savedTok;
 fetchStatus();
 fetchParams();
+pollLogs();
 setInterval(fetchStatus, 2500);
+setInterval(pollLogs, 700);
 </script>
 </body>
 </html>)rawliteral";

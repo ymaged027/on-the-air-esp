@@ -1,4 +1,5 @@
 #include "ota_manager.h"
+#include "ota_monitor.h"
 #include "config.h"
 #include "web_ui.h"
 
@@ -14,8 +15,6 @@
 // =============================================================================
 // CRITICAL: Override Arduino-ESP32's weak verifyRollbackLater()
 // =============================================================================
-// Keeps newly-flashed OTA images in ESP_OTA_IMG_PENDING_VERIFY until
-// serviceRollbackConfirmation() proves the firmware stayed healthy.
 extern "C" bool verifyRollbackLater() {
   return true;
 }
@@ -27,6 +26,25 @@ namespace {
 WebServer g_server(80);
 DNSServer g_dnsServer;
 OtaManager* g_instance = nullptr;
+
+String jsonEscape(const String& in) {
+  String out;
+  out.reserve(in.length() + 16);
+  for (size_t i = 0; i < in.length(); ++i) {
+    char c = in[i];
+    switch (c) {
+      case '\"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n";  break;
+      case '\r': out += "\\r";  break;
+      case '\t': out += "\\t";  break;
+      default:
+        if ((uint8_t)c >= 0x20) out += c;
+        break;
+    }
+  }
+  return out;
+}
 }  // namespace
 
 void OtaManager::setCredentials(const char* ssid, const char* password, const char* ideHostname) {
@@ -58,8 +76,10 @@ void OtaManager::begin(AppParams* params,
   bootMs_    = millis();
   g_instance = this;
 
-  // Print embedded tag at boot (also guarantees linker keeps it in .rodata of the .bin)
-  Serial.printf("[OTA] %s\n", EMBEDDED_FW_META);
+  OtaMonitor.printf("[OTA] %s\n", EMBEDDED_FW_META);
+  OtaMonitor.onCommand([](const String& cmd) {
+    if (g_instance) g_instance->handleMonitorCommand(cmd);
+  });
 
   pinMode(PIN_STATUS_LED, OUTPUT);
   pinMode(PIN_OTA_SWITCH, INPUT_PULLUP);
@@ -78,14 +98,14 @@ bool OtaManager::shouldEnterMaintenanceMode() {
   if (digitalRead(PIN_OTA_SWITCH) == LOW) {
     delay(25);
     if (digitalRead(PIN_OTA_SWITCH) == LOW) {
-      Serial.println(F("[OTA] OTA switch ACTIVE -> Maintenance Mode"));
+      OtaMonitor.println(F("[OTA] OTA switch ACTIVE -> Maintenance Mode"));
       return true;
     }
   }
 
 #if BOOT_WINDOW_MS > 0
-  Serial.printf("[OTA] Press BOOT (GPIO %d) within %d ms for Maintenance Mode...\n",
-                PIN_BOOT_BTN, BOOT_WINDOW_MS);
+  OtaMonitor.printf("[OTA] Press BOOT (GPIO %d) within %d ms for Maintenance Mode...\n",
+                    PIN_BOOT_BTN, BOOT_WINDOW_MS);
   uint32_t start = millis();
   uint32_t heldSince = 0;
 
@@ -96,7 +116,7 @@ bool OtaManager::shouldEnterMaintenanceMode() {
     if (digitalRead(PIN_BOOT_BTN) == LOW) {
       if (heldSince == 0) heldSince = millis();
       if (millis() - heldSince >= 400) {
-        Serial.println(F("[OTA] BOOT button held -> Maintenance Mode"));
+        OtaMonitor.println(F("[OTA] BOOT button held -> Maintenance Mode"));
         digitalWrite(PIN_STATUS_LED, HIGH);
         return true;
       }
@@ -113,23 +133,30 @@ bool OtaManager::shouldEnterMaintenanceMode() {
 
 void OtaManager::disableRadiosForRunMode() {
   maintenanceActive_ = false;
+  wirelessActive_    = false;
   dnsActive_         = false;
+  OtaMonitor.stopServer();
   WiFi.disconnect(true, true);
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
   btStop();
-  Serial.println(F("[OTA] Normal Run Mode: Wi-Fi & Bluetooth completely OFF."));
+  OtaMonitor.println(F("[OTA] Normal Run Mode: Wi-Fi & Bluetooth completely OFF."));
 }
 
 void OtaManager::startMaintenanceMode() {
-  if (disarmFn_) {
+  maintenanceActive_ = true;
+  startWirelessServices(true);
+}
+
+void OtaManager::startWirelessServices(bool disarmOutputs) {
+  if (disarmOutputs && disarmFn_) {
     disarmFn_();
   }
 
   bool connectedSta = false;
 
 #if OTA_USE_STA_FIRST
-  Serial.printf("[OTA] Connecting to Wi-Fi '%s'...\n", OTA_STA_SSID);
+  OtaMonitor.printf("[OTA] Connecting to Wi-Fi '%s'...\n", OTA_STA_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.begin(OTA_STA_SSID, OTA_STA_PASS);
   uint32_t t0 = millis();
@@ -139,29 +166,30 @@ void OtaManager::startMaintenanceMode() {
   }
   if (WiFi.status() == WL_CONNECTED) {
     connectedSta = true;
-    Serial.print(F("[OTA] Connected STA IP: "));
-    Serial.println(WiFi.localIP());
+    OtaMonitor.printf("[OTA] Connected STA IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
-    Serial.println(F("[OTA] External Wi-Fi unavailable, falling back to SoftAP."));
+    OtaMonitor.println(F("[OTA] External Wi-Fi unavailable, falling back to SoftAP."));
   }
 #endif
 
   if (!connectedSta) {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(apSsid_, apPass_, OTA_AP_CHANNEL);
-    delay(150);  // Let SoftAP netif settle before starting DNS & mDNS
+    delay(150);
     IPAddress apIp = WiFi.softAPIP();
     g_dnsServer.start(53, "*", apIp);
     dnsActive_ = true;
-    Serial.printf("[OTA] SoftAP ready: SSID='%s' IP=%s (Captive Portal ON)\n",
-                  apSsid_, apIp.toString().c_str());
+    OtaMonitor.printf("[OTA] SoftAP ready: SSID='%s' IP=%s (Captive Portal ON)\n",
+                      apSsid_, apIp.toString().c_str());
   }
 
   registerRoutes();
   g_server.begin();
   startArduinoOta();
-  maintenanceActive_ = true;
-  Serial.println(F("[OTA] Web Console (HTTP :80) & Arduino IDE Network Port ready."));
+  OtaMonitor.beginServer(OTA_MONITOR_PORT);
+  wirelessActive_ = true;
+  OtaMonitor.printf("[OTA] Web Console (:80), OTA Monitor (:%u) & Arduino IDE Port ready.\n",
+                    (unsigned)OTA_MONITOR_PORT);
 }
 
 void OtaManager::startArduinoOta() {
@@ -172,11 +200,11 @@ void OtaManager::startArduinoOta() {
 
   ArduinoOTA.onStart([this]() {
     if (isArmedFn_ && isArmedFn_()) {
-      Serial.println(F("[ArduinoOTA] Blocked: device outputs are ARMED!"));
+      OtaMonitor.println(F("[ArduinoOTA] Blocked: device outputs are ARMED!"));
       ESP.restart();
     }
     if (disarmFn_) disarmFn_();
-    Serial.println(F("[ArduinoOTA] Flashing from Arduino IDE..."));
+    OtaMonitor.println(F("[ArduinoOTA] Flashing from Arduino IDE..."));
   });
 
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -187,11 +215,11 @@ void OtaManager::startArduinoOta() {
   });
 
   ArduinoOTA.onEnd([]() {
-    Serial.println(F("\n[ArduinoOTA] Flash complete! Rebooting..."));
+    OtaMonitor.println(F("\n[ArduinoOTA] Flash complete! Rebooting..."));
   });
 
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("[ArduinoOTA] Error[%u]\n", (unsigned)error);
+    OtaMonitor.printf("[ArduinoOTA] Error[%u]\n", (unsigned)error);
   });
 
   ArduinoOTA.begin();
@@ -206,6 +234,9 @@ void OtaManager::registerRoutes() {
   g_server.on("/api/params", HTTP_GET, []() { g_instance->handleGetParams(); });
   g_server.on("/api/params", HTTP_POST, []() { g_instance->handlePostParams(); });
   g_server.on("/api/params/reset", HTTP_POST, []() { g_instance->handleResetParams(); });
+  g_server.on("/api/logs", HTTP_GET, []() { g_instance->handleGetLogs(); });
+  g_server.on("/api/logs/clear", HTTP_POST, []() { g_instance->handleClearLogs(); });
+  g_server.on("/api/logs/send", HTTP_POST, []() { g_instance->handleSendLogCmd(); });
   g_server.on(
       "/api/ota",
       HTTP_POST,
@@ -225,36 +256,68 @@ void OtaManager::registerRoutes() {
 }
 
 void OtaManager::handleClient() {
-  if (!maintenanceActive_) return;
+  if (!wirelessActive_) return;
 
   if (dnsActive_) {
     g_dnsServer.processNextRequest();
   }
   g_server.handleClient();
   ArduinoOTA.handle();
+  OtaMonitor.handle();
 
-  static uint32_t lastBlink = 0;
-  if (millis() - lastBlink >= 600) {
-    lastBlink = millis();
-    digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
+  if (maintenanceActive_) {
+    static uint32_t lastBlink = 0;
+    if (millis() - lastBlink >= 600) {
+      lastBlink = millis();
+      digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
+    }
   }
 
   if (pendingRollback_ && millis() >= actionAtMs_) {
-    Serial.println(F("[OTA] Executing rollback & reboot..."));
+    OtaMonitor.println(F("[OTA] Executing rollback & reboot..."));
     Serial.flush();
     esp_ota_mark_app_invalid_rollback_and_reboot();
     ESP.restart();
   }
   if (pendingReboot_ && millis() >= actionAtMs_) {
-    Serial.println(F("[OTA] Rebooting..."));
+    OtaMonitor.println(F("[OTA] Rebooting..."));
     Serial.flush();
     ESP.restart();
   }
 }
 
+void OtaManager::handleMonitorCommand(const String& cmd) {
+  String lower = cmd;
+  lower.toLowerCase();
+
+  if (lower == "help" || lower == "?") {
+    OtaMonitor.println(F("OTA Monitor commands: help | status | params | clear | reboot | rollback"));
+  } else if (lower == "status") {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    OtaMonitor.printf("Device=%s v%s | Slot=%s | State=%s | Heap=%u B | Uptime=%lu s\n",
+                      deviceId_,
+                      fwVersion_,
+                      running ? running->label : "?",
+                      getOtaStateString(),
+                      (unsigned)ESP.getFreeHeap(),
+                      (unsigned long)(millis() / 1000UL));
+  } else if (lower == "params" && params_) {
+    OtaMonitor.println(AppParamsStore::toJson(*params_));
+  } else if (lower == "clear") {
+    OtaMonitor.clearBuffer();
+  } else if (lower == "reboot") {
+    OtaMonitor.println(F("[OTA] Reboot scheduled via OTA Monitor..."));
+    pendingReboot_ = true;
+    actionAtMs_    = millis() + 300;
+  } else if (lower == "rollback") {
+    OtaMonitor.println(F("[OTA] Rollback scheduled via OTA Monitor..."));
+    pendingRollback_ = true;
+    actionAtMs_      = millis() + 300;
+  }
+}
+
 void OtaManager::serviceRollbackConfirmation() {
   if (rollbackConfirmed_) return;
-
   if (millis() - bootMs_ >= OTA_SELF_TEST_WINDOW_MS) {
     confirmRollbackNow();
   }
@@ -266,9 +329,9 @@ void OtaManager::confirmRollbackNow() {
 
   esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
   if (err == ESP_OK) {
-    Serial.println(F("[OTA] Self-test passed! Firmware marked VALID (rollback cancelled)."));
+    OtaMonitor.println(F("[OTA] Self-test passed! Firmware marked VALID (rollback cancelled)."));
   } else {
-    Serial.printf("[OTA] Warning: mark_app_valid returned %d\n", (int)err);
+    OtaMonitor.printf("[OTA] Warning: mark_app_valid returned %d\n", (int)err);
   }
 }
 
@@ -327,7 +390,7 @@ void OtaManager::handleStatus() {
   uint64_t mac = ESP.getEfuseMac();
 
   String json;
-  json.reserve(416);
+  json.reserve(432);
   json += '{';
   json += "\"ok\":true,";
   json += "\"deviceId\":\"" + String(deviceId_) + "\",";
@@ -336,6 +399,7 @@ void OtaManager::handleStatus() {
   json += "\"chipId\":\"" + String((uint32_t)(mac >> 32), HEX) + String((uint32_t)mac, HEX) + "\",";
   json += "\"partition\":\"" + String(partLabel) + "\",";
   json += "\"otaState\":\"" + String(getOtaStateString()) + "\",";
+  json += "\"monitorPort\":" + String(OTA_MONITOR_PORT) + ',';
   json += "\"authRequired\":" + String(isAuthRequired() ? "true" : "false") + ',';
   json += "\"armed\":" + String(armed ? "true" : "false") + ',';
   json += "\"batteryMonitor\":" + String(BATTERY_MONITOR_ENABLED ? "true" : "false") + ',';
@@ -376,6 +440,7 @@ void OtaManager::handlePostParams() {
     return;
   }
   *params_ = saved;
+  OtaMonitor.println("[OTA] Saved NVS params: " + AppParamsStore::toJson(*params_));
   String resp = "{\"ok\":true,\"params\":" + AppParamsStore::toJson(*params_) + "}";
   g_server.send(200, "application/json", resp);
 }
@@ -392,8 +457,42 @@ void OtaManager::handleResetParams() {
     return;
   }
   *params_ = saved;
+  OtaMonitor.println(F("[OTA] Reset NVS params to defaults."));
   String resp = "{\"ok\":true,\"params\":" + AppParamsStore::toJson(*params_) + "}";
   g_server.send(200, "application/json", resp);
+}
+
+void OtaManager::handleGetLogs() {
+  uint32_t since = 0;
+  if (g_server.hasArg("since")) {
+    since = (uint32_t)strtoul(g_server.arg("since").c_str(), nullptr, 10);
+  }
+  uint32_t nextOffset = 0;
+  String chunk = OtaMonitor.readLogChunk(since, nextOffset);
+  String json;
+  json.reserve(chunk.length() + 64);
+  json += "{\"ok\":true,\"next\":";
+  json += String(nextOffset);
+  json += ",\"data\":\"";
+  json += jsonEscape(chunk);
+  json += "\"}";
+  g_server.send(200, "application/json", json);
+}
+
+void OtaManager::handleClearLogs() {
+  OtaMonitor.clearBuffer();
+  g_server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void OtaManager::handleSendLogCmd() {
+  String cmd = g_server.arg("cmd");
+  cmd.trim();
+  if (cmd.length() == 0) {
+    g_server.send(400, "application/json", "{\"ok\":false,\"error\":\"Empty command\"}");
+    return;
+  }
+  OtaMonitor.injectCommand(cmd);
+  g_server.send(200, "application/json", "{\"ok\":true}");
 }
 
 void OtaManager::handleOtaUpload() {
@@ -406,20 +505,20 @@ void OtaManager::handleOtaUpload() {
 
     if (!isTokenValid(g_server.header("X-OTA-Token"))) {
       otaError_ = "Invalid OTA token";
-      Serial.println(F("[OTA] Rejected: invalid token"));
+      OtaMonitor.println(F("[OTA] Rejected: invalid token"));
       return;
     }
 
     String targetDevice = g_server.header("X-Target-Device");
     if (targetDevice.length() > 0 && targetDevice != deviceId_) {
       otaError_ = "Target mismatch (expected " + String(deviceId_) + ", got " + targetDevice + ")";
-      Serial.println("[OTA] Rejected: " + otaError_);
+      OtaMonitor.println("[OTA] Rejected: " + otaError_);
       return;
     }
 
     if (isArmedFn_ && isArmedFn_()) {
       otaError_ = "Outputs are ARMED — disarm device before flashing";
-      Serial.println(F("[OTA] Rejected: outputs armed"));
+      OtaMonitor.println(F("[OTA] Rejected: outputs armed"));
       return;
     }
 
@@ -427,23 +526,23 @@ void OtaManager::handleOtaUpload() {
     float v = readBatteryVoltage();
     if (v < BATTERY_MIN_OTA_VOLTS) {
       otaError_ = "Battery too low for safe flash (" + String(v, 2) + "V < " + String(BATTERY_MIN_OTA_VOLTS, 2) + "V)";
-      Serial.println("[OTA] Rejected: " + otaError_);
+      OtaMonitor.println("[OTA] Rejected: " + otaError_);
       return;
     }
 #endif
 
     if (disarmFn_) disarmFn_();
-    Serial.printf("[OTA] Starting flash: %s\n", upload.filename.c_str());
+    OtaMonitor.printf("[OTA] Starting flash: %s\n", upload.filename.c_str());
 
     String md5 = g_server.header("X-Firmware-MD5");
     if (md5.length() == 32) {
       Update.setMD5(md5.c_str());
-      Serial.println("[OTA] MD5 check enabled: " + md5);
+      OtaMonitor.println("[OTA] MD5 check enabled: " + md5);
     }
 
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
       otaError_ = String("Update.begin failed: ") + Update.errorString();
-      Serial.println("[OTA] " + otaError_);
+      OtaMonitor.println("[OTA] " + otaError_);
       return;
     }
     otaAuthorized_ = true;
@@ -455,7 +554,7 @@ void OtaManager::handleOtaUpload() {
     if (!otaAuthorized_) return;
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
       otaError_ = String("Update.write failed: ") + Update.errorString();
-      Serial.println("[OTA] " + otaError_);
+      OtaMonitor.println("[OTA] " + otaError_);
       Update.abort();
       otaAuthorized_ = false;
     }
@@ -466,17 +565,17 @@ void OtaManager::handleOtaUpload() {
 
     if (Update.end(true)) {
       otaSuccess_ = true;
-      Serial.printf("[OTA] Flash complete (%u bytes). Scheduling reboot.\n", upload.totalSize);
+      OtaMonitor.printf("[OTA] Flash complete (%u bytes). Scheduling reboot.\n", upload.totalSize);
     } else {
       otaError_ = String("Update.end failed: ") + Update.errorString();
-      Serial.println("[OTA] " + otaError_);
+      OtaMonitor.println("[OTA] " + otaError_);
     }
 
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     Update.abort();
     otaAuthorized_ = false;
     otaError_ = "Upload aborted by client";
-    Serial.println(F("[OTA] Upload aborted."));
+    OtaMonitor.println(F("[OTA] Upload aborted."));
   }
 }
 

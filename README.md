@@ -55,7 +55,17 @@ Enter **Maintenance Mode** (press **`BOOT`** right after power-on while the blue
 
 1. **Direct Inside Arduino IDE:** Select **Tools → Port → `MTR-OTA at 192.168.4.1`** → click **Upload (→)** → password **`mtr-ota007`**.
 2. **1-Click `flash.bat` (Windows):** Double-click **`flash.bat`** to compile & flash the starter sketch — or **drag & drop ANY `.ino` file onto `flash.bat`**!
-3. **Phone or Browser (Auto-Popup Captive Portal):** Connecting to `MTR-OTA` pops open the Web Console (`http://192.168.4.1`, or double-click `open-console.bat`) for 2-second live NVS parameter tuning, drag-and-drop `.bin` flashing, or 1-click Rollback.
+3. **Phone or Browser (Auto-Popup Captive Portal):** Connecting to `MTR-OTA` pops open the Web Console (`http://192.168.4.1`, or double-click `open-console.bat`) with live **OTA Monitor**, 2-second NVS parameter tuning, drag-and-drop `.bin` flashing, and 1-click Rollback.
+
+---
+
+## Wireless OTA Monitor (Web + Arduino IDE + Terminal)
+
+Watch logs and send commands completely wirelessly — no USB cable required:
+- **Inside Arduino IDE:** `setup-usb.bat` and `install-library.bat` automatically register **OTA Monitor** as Arduino IDE's pluggable monitor for `network` ports (`platform.local.txt`). Just select **Tools → Port → `MTR-OTA at 192.168.4.1`** and open **Serial Monitor**!
+- **In Your Browser / Phone:** Open `http://192.168.4.1` and use the built-in **OTA Monitor** terminal card (type `help`, `status`, `params`, `reboot`, `rollback`).
+- **In Windows Terminal:** Double-click **`ota-monitor.bat`**.
+- **In Your Own Sketch:** Print with `OtaMonitor.println("sensor = ...")` (mirrors to USB Serial, Web OTA Monitor, and Arduino IDE Monitor simultaneously). Call `OnTheAirESP.enableDebugMode();` before `begin()` and `OnTheAirESP.handle();` in `loop()` to stream live logs while your sketch runs!
 
 ---
 

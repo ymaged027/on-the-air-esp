@@ -77,6 +77,62 @@ def default_arduino_libraries_dir() -> Path:
     return home / "Arduino" / "libraries"
 
 
+def default_esp32_hardware_dirs() -> List[Path]:
+    """Return installed Arduino esp32 hardware version directories."""
+    home = Path.home()
+    roots = []
+    if os.name == "nt":
+        local_app = os.environ.get("LOCALAPPDATA", "")
+        if local_app:
+            roots.append(Path(local_app) / "Arduino15" / "packages" / "esp32" / "hardware" / "esp32")
+    else:
+        roots.append(home / ".arduino15" / "packages" / "esp32" / "hardware" / "esp32")
+        roots.append(home / "Library" / "Arduino15" / "packages" / "esp32" / "hardware" / "esp32")
+
+    found: List[Path] = []
+    for root in roots:
+        if root.is_dir():
+            for child in sorted(root.iterdir()):
+                if child.is_dir() and (child / "platform.txt").is_file():
+                    found.append(child)
+    return found
+
+
+def install_ide_monitor(
+    hardware_dirs: Optional[List[Path]] = None,
+    repo_root: Path = REPO_ROOT,
+    python_exe: str = sys.executable,
+) -> List[Path]:
+    """
+    Register OTA Monitor as Arduino IDE's official Pluggable Monitor for `network` ports
+    by writing `pluggable_monitor.pattern.network` into esp32's platform.local.txt.
+    """
+    dirs = hardware_dirs if hardware_dirs is not None else default_esp32_hardware_dirs()
+    monitor_script = (repo_root / "tools" / "ota_monitor.py").resolve()
+    py_path = Path(python_exe).resolve().as_posix()
+    mon_path = monitor_script.as_posix()
+    prop_line = f'pluggable_monitor.pattern.network="{py_path}" "{mon_path}"'
+
+    updated: List[Path] = []
+    for hw_dir in dirs:
+        local_txt = hw_dir / "platform.local.txt"
+        existing_lines: List[str] = []
+        if local_txt.is_file():
+            existing_lines = local_txt.read_text(encoding="utf-8", errors="replace").splitlines()
+
+        filtered = [
+            ln
+            for ln in existing_lines
+            if not ln.strip().startswith("pluggable_monitor.pattern.network=")
+            and ln.strip() != "# On The Air ESP - Arduino IDE Wireless OTA Monitor"
+        ]
+        filtered.append("# On The Air ESP - Arduino IDE Wireless OTA Monitor")
+        filtered.append(prop_line)
+        local_txt.write_text("\n".join(filtered).strip() + "\n", encoding="utf-8")
+        updated.append(local_txt)
+    return updated
+
+
 def install_arduino_library(target_libraries_dir: Optional[Path] = None, repo_root: Path = REPO_ROOT) -> Path:
     """Install OnTheAirESP into Arduino IDE's libraries folder so #include <OnTheAirESP.h> works everywhere."""
     libs_dir = target_libraries_dir or default_arduino_libraries_dir()
@@ -428,16 +484,30 @@ def cmd_install_lib(args: argparse.Namespace) -> int:
     target = Path(args.dir) if args.dir else None
     dest = install_arduino_library(target_libraries_dir=target)
     print(f"Installed Arduino library 'OnTheAirESP' -> {dest}")
-    print("Restart Arduino IDE (if open) to use #include <OnTheAirESP.h> and File -> Examples -> OnTheAirESP.")
+    updated = install_ide_monitor()
+    for p in updated:
+        print(f"Registered Arduino IDE OTA Monitor -> {p}")
+    print("Restart Arduino IDE (if open) to activate OnTheAirESP + wireless OTA Monitor.")
+    return 0
+
+
+def cmd_install_monitor(args: argparse.Namespace) -> int:
+    updated = install_ide_monitor()
+    if not updated:
+        print("No installed esp32 Arduino core found yet. Run setup-usb.bat first.", file=sys.stderr)
+        return 2
+    for p in updated:
+        print(f"Registered Arduino IDE OTA Monitor -> {p}")
+    print("Restart Arduino IDE to use the built-in Monitor on network ports (e.g. 192.168.4.1).")
     return 0
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
-    print("[1/3] Installing OnTheAirESP into Arduino IDE libraries...")
+    print("[1/4] Installing OnTheAirESP into Arduino IDE libraries...")
     dest = install_arduino_library()
     print(f"      Installed -> {dest}")
 
-    print("[2/3] Checking Arduino CLI & ESP32 NodeMCU-32S board core...")
+    print("[2/4] Checking Arduino CLI & ESP32 NodeMCU-32S board core...")
     cli = find_arduino_cli()
     if not cli:
         print("Error: Arduino IDE 2.x / arduino-cli not found.", file=sys.stderr)
@@ -445,11 +515,16 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 2
     ensure_esp32_core(cli)
 
+    print("[3/4] Registering wireless OTA Monitor in Arduino IDE...")
+    updated = install_ide_monitor()
+    for p in updated:
+        print(f"      Registered -> {p}")
+
     if args.no_flash:
-        print("[3/3] Skipping USB flash (--no-flash). Setup complete!")
+        print("[4/4] Skipping USB flash (--no-flash). Setup complete!")
         return 0
 
-    print("[3/3] Looking for plugged-in ESP32 NodeMCU-32S over USB...")
+    print("[4/4] Looking for plugged-in ESP32 NodeMCU-32S over USB...")
     port = args.port
     if not port:
         ports = list_serial_ports(cli)
@@ -624,9 +699,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_setup.add_argument("--no-flash", action="store_true", help="Only install library & ESP32 core without USB flashing")
     p_setup.set_defaults(func=cmd_setup)
 
-    p_lib = sub.add_parser("install-lib", help="Install OnTheAirESP into Arduino IDE Libraries")
+    p_lib = sub.add_parser("install-lib", help="Install OnTheAirESP library & register Arduino IDE OTA Monitor")
     p_lib.add_argument("--dir", default=None, help="Custom Arduino libraries directory")
     p_lib.set_defaults(func=cmd_install_lib)
+
+    p_mon = sub.add_parser("install-monitor", help="Register wireless OTA Monitor inside Arduino IDE")
+    p_mon.set_defaults(func=cmd_install_monitor)
 
     p_push = sub.add_parser("push", help="ONE-COMMAND compile + wireless OTA flash (supports any .ino or sketch folder)")
     p_push.add_argument("sketch", nargs="?", default=str(SKETCH_DIR), help="Sketch folder or .ino file")

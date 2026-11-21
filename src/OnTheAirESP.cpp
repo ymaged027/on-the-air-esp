@@ -27,9 +27,6 @@ void initWatchdog() {
 #else
   esp_task_wdt_init(WDT_TIMEOUT_SEC, true);
 #endif
-  // Use Arduino's enableLoopWDT() so main.cpp automatically feeds the watchdog
-  // on every loop() iteration — prevents false WDT crashes if user omits handle(),
-  // while still catching real infinite loops / freezes and triggering auto-rollback!
   enableLoopWDT();
 }
 
@@ -40,8 +37,6 @@ void scheduleBackgroundRollbackConfirm(OtaManager* mgr) {
   args.arg      = mgr;
   args.name     = "ota_confirm";
   if (esp_timer_create(&args, &g_rollbackTimer) == ESP_OK) {
-    // Fire strictly AFTER WDT_TIMEOUT_SEC (12s > 10s) so any infinite loop in
-    // setup()/loop() gets caught by the watchdog and rolled back FIRST!
     const uint64_t delayUs = (uint64_t)(WDT_TIMEOUT_SEC + 2) * 1000000ULL;
     esp_timer_start_once(g_rollbackTimer, delayUs);
   }
@@ -76,23 +71,20 @@ void OnTheAirEspFacade::begin(unsigned long serialBaud, bool blockInOtaMode) {
     delay(150);
   }
 
-  Serial.println();
-  Serial.println(F("========================================"));
-  Serial.printf(" %s (%s) — Firmware v%s\n",
-                ota_.getDeviceId(), DEVICE_BOARD, ota_.getFirmwareVersion());
-  Serial.println(F("========================================"));
+  OtaMonitor.println();
+  OtaMonitor.println(F("========================================"));
+  OtaMonitor.printf(" %s (%s) — Firmware v%s\n",
+                    ota_.getDeviceId(), DEVICE_BOARD, ota_.getFirmwareVersion());
+  OtaMonitor.println(F("========================================"));
 
   initWatchdog();
   paramsStore_.load(params_);
   ota_.begin(&params_, &paramsStore_, disarmFn_, isArmedFn_);
-  Serial.printf("[OTA] Boot state: %s\n", ota_.getOtaStateString());
+  OtaMonitor.printf("[OTA] Boot state: %s\n", ota_.getOtaStateString());
 
   if (ota_.shouldEnterMaintenanceMode()) {
     ota_.startMaintenanceMode();
     if (blockInOtaMode) {
-      // Dedicated Maintenance Loop: keeps WDT fed, serves Captive Portal,
-      // Web Console, and Arduino IDE Network Port indefinitely without ever
-      // running user setup()/loop() code!
       for (;;) {
         feedLoopWDT();
         ota_.serviceRollbackConfirmation();
@@ -100,6 +92,11 @@ void OnTheAirEspFacade::begin(unsigned long serialBaud, bool blockInOtaMode) {
         delay(2);
       }
     }
+  } else if (debugMode_) {
+    OtaMonitor.println(F("[OTA] Debug Mode: Wi-Fi + OTA Monitor active alongside user sketch."));
+    ota_.startWirelessServices(false);
+    digitalWrite(PIN_STATUS_LED, HIGH);
+    scheduleBackgroundRollbackConfirm(&ota_);
   } else {
     ota_.disableRadiosForRunMode();
     digitalWrite(PIN_STATUS_LED, HIGH);
@@ -111,9 +108,8 @@ bool OnTheAirEspFacade::handle() {
   feedLoopWDT();
   ota_.serviceRollbackConfirmation();
 
-  if (ota_.isMaintenanceActive()) {
+  if (ota_.isWirelessActive()) {
     ota_.handleClient();
-    return true;
   }
-  return false;
+  return ota_.isMaintenanceActive();
 }

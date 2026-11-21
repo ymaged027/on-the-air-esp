@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import http.server
+import io
 import json
+import socket
 import sys
 import tempfile
 import threading
@@ -12,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import ota_flash  # noqa: E402
+import ota_monitor  # noqa: E402
 
 
 class MockDeviceState:
@@ -176,6 +179,72 @@ class OtaFlashTests(unittest.TestCase):
             self.assertTrue((installed / "examples" / "BasicOTA" / "BasicOTA.ino").is_file())
             ino = installed / "examples" / "BasicOTA" / "BasicOTA.ino"
             self.assertEqual(ota_flash.resolve_sketch_dir(ino), ino.parent)
+
+    def test_install_ide_monitor_writes_platform_local(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hw = Path(td)
+            (hw / "platform.txt").write_text("name=esp32\n", encoding="utf-8")
+            updated = ota_flash.install_ide_monitor(hardware_dirs=[hw])
+            self.assertEqual(len(updated), 1)
+            text = (hw / "platform.local.txt").read_text(encoding="utf-8")
+            self.assertIn("pluggable_monitor.pattern.network=", text)
+            self.assertIn("ota_monitor.py", text)
+
+    def test_pluggable_ota_monitor_bridge(self) -> None:
+        # Start mock ESP32 OTA Monitor server (port 23 equivalent) and mock IDE TCP listener
+        esp_srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        esp_srv.bind(("127.0.0.1", 0))
+        esp_srv.listen(1)
+        esp_port = esp_srv.getsockname()[1]
+
+        ide_srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ide_srv.bind(("127.0.0.1", 0))
+        ide_srv.listen(1)
+        ide_port = ide_srv.getsockname()[1]
+
+        esp_received = bytearray()
+
+        def esp_worker() -> None:
+            conn, _ = esp_srv.accept()
+            conn.sendall(b"HELLO FROM ESP32\n")
+            esp_received.extend(conn.recv(64))
+            conn.close()
+
+        t_esp = threading.Thread(target=esp_worker, daemon=True)
+        t_esp.start()
+
+        mon = ota_monitor.PluggableOtaMonitor()
+        buf = io.StringIO()
+        orig_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            mon.handle_command('HELLO 1 "arduino-cli"')
+            mon.handle_command("DESCRIBE")
+            mon.handle_command(f"CONFIGURE port {esp_port}")
+            mon.handle_command(f"OPEN 127.0.0.1:{ide_port} 127.0.0.1")
+
+            ide_conn, _ = ide_srv.accept()
+            ide_conn.settimeout(3)
+            from_esp = ide_conn.recv(64)
+            self.assertEqual(from_esp, b"HELLO FROM ESP32\n")
+            ide_conn.sendall(b"status\n")
+            t_esp.join(timeout=3)
+            self.assertEqual(bytes(esp_received), b"status\n")
+
+            mon.handle_command("CLOSE")
+            mon.handle_command("QUIT")
+            ide_conn.close()
+        finally:
+            sys.stdout = orig_stdout
+            esp_srv.close()
+            ide_srv.close()
+
+        events = [json.loads(line) for line in buf.getvalue().splitlines() if line.strip()]
+        types = [e["eventType"] for e in events]
+        self.assertIn("hello", types)
+        self.assertIn("describe", types)
+        self.assertIn("open", types)
+        self.assertIn("quit", types)
 
 
 if __name__ == "__main__":

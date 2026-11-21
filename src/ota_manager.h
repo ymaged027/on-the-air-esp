@@ -9,7 +9,6 @@ using IsArmedCallback = bool (*)();
 
 class OtaManager {
 public:
-  // Optional runtime overrides (call before begin() / startMaintenanceMode()).
   void setCredentials(const char* ssid, const char* password, const char* ideHostname = nullptr);
   void setDeviceId(const char* deviceId, const char* version = FW_VERSION);
 
@@ -21,15 +20,18 @@ public:
   bool shouldEnterMaintenanceMode();
   void disableRadiosForRunMode();
   void startMaintenanceMode();
+  void startWirelessServices(bool disarmOutputs);
   void handleClient();
   void serviceRollbackConfirmation();
   void confirmRollbackNow();
+  void handleMonitorCommand(const String& cmd);
 
   float readBatteryVoltage() const;
   const char* getOtaStateString() const;
   const char* getDeviceId() const { return deviceId_; }
   const char* getFirmwareVersion() const { return fwVersion_; }
   bool isMaintenanceActive() const { return maintenanceActive_; }
+  bool isWirelessActive() const { return wirelessActive_; }
 
 private:
   bool isAuthRequired() const;
@@ -43,6 +45,9 @@ private:
   void handleGetParams();
   void handlePostParams();
   void handleResetParams();
+  void handleGetLogs();
+  void handleClearLogs();
+  void handleSendLogCmd();
   void handleOtaComplete();
   void handleOtaUpload();
   void handleRollback();
@@ -61,6 +66,7 @@ private:
   IsArmedCallback isArmedFn_ = nullptr;
 
   bool maintenanceActive_    = false;
+  bool wirelessActive_       = false;
   bool dnsActive_            = false;
   bool rollbackConfirmed_    = false;
   uint32_t bootMs_           = 0;
