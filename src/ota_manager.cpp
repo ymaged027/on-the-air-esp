@@ -149,6 +149,7 @@ void OtaManager::startMaintenanceMode() {
   if (!connectedSta) {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(apSsid_, apPass_, OTA_AP_CHANNEL);
+    delay(150);  // Let SoftAP netif settle before starting DNS & mDNS
     IPAddress apIp = WiFi.softAPIP();
     g_dnsServer.start(53, "*", apIp);
     dnsActive_ = true;
@@ -255,13 +256,19 @@ void OtaManager::serviceRollbackConfirmation() {
   if (rollbackConfirmed_) return;
 
   if (millis() - bootMs_ >= OTA_SELF_TEST_WINDOW_MS) {
-    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
-    if (err == ESP_OK) {
-      Serial.println(F("[OTA] Self-test passed! Firmware marked VALID (rollback cancelled)."));
-    } else {
-      Serial.printf("[OTA] Warning: mark_app_valid returned %d\n", (int)err);
-    }
-    rollbackConfirmed_ = true;
+    confirmRollbackNow();
+  }
+}
+
+void OtaManager::confirmRollbackNow() {
+  if (rollbackConfirmed_) return;
+  rollbackConfirmed_ = true;
+
+  esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+  if (err == ESP_OK) {
+    Serial.println(F("[OTA] Self-test passed! Firmware marked VALID (rollback cancelled)."));
+  } else {
+    Serial.printf("[OTA] Warning: mark_app_valid returned %d\n", (int)err);
   }
 }
 

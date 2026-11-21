@@ -31,7 +31,6 @@ void setup() {
   OnTheAirESP.setDisarmCallback(safeDisarmOutputs);
   OnTheAirESP.setArmedCallback(isDeviceArmed);
   OnTheAirESP.begin();
-  if (OnTheAirESP.isOtaMode()) return;
 
   // --- PUT YOUR SETUP CODE BELOW (Wi-Fi & Bluetooth are 100% OFF) ---
   Serial.println(F("[APP] Normal Run Mode ready! Active NVS parameters:"));
@@ -39,8 +38,6 @@ void setup() {
 }
 
 void loop() {
-  if (OnTheAirESP.handle()) return;
-
   // --- PUT YOUR LOOP CODE BELOW ---
   // Live-tuned params available anytime:
   //   OnTheAirESP.params().speedNormal      (0..255)

@@ -29,24 +29,21 @@
 
 ---
 
-## Add Wireless OTA to *Any* Arduino Sketch in 3 Lines
+## Add Wireless OTA to *Any* Arduino Sketch in 1 Line
 
-Once installed, open **File → Examples → OnTheAirESP → BasicOTA** (or add these 3 lines to any existing ESP32 sketch):
+Once installed, open **File → Examples → OnTheAirESP → BasicOTA** (or add `OnTheAirESP.begin();` to any existing ESP32 sketch):
 
 ```cpp
 #include <OnTheAirESP.h>
 
 void setup() {
   OnTheAirESP.begin();
-  if (OnTheAirESP.isOtaMode()) return;
 
   // Your normal setup() code here (Wi-Fi & Bluetooth are 100% OFF!)
 }
 
 void loop() {
-  if (OnTheAirESP.handle()) return;
-
-  // Your normal loop() code here
+  // Your normal loop() code here (Watchdog & rollback handled automatically!)
 }
 ```
 

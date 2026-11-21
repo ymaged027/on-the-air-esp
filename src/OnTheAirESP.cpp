@@ -1,9 +1,19 @@
 #include "OnTheAirESP.h"
 #include <esp_task_wdt.h>
+#include <esp_timer.h>
 
 OnTheAirEspFacade OnTheAirESP;
 
 namespace {
+esp_timer_handle_t g_rollbackTimer = nullptr;
+
+void rollbackTimerCallback(void* arg) {
+  auto* mgr = static_cast<OtaManager*>(arg);
+  if (mgr) {
+    mgr->confirmRollbackNow();
+  }
+}
+
 void initWatchdog() {
 #if defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
   esp_task_wdt_config_t cfg = {
@@ -17,7 +27,24 @@ void initWatchdog() {
 #else
   esp_task_wdt_init(WDT_TIMEOUT_SEC, true);
 #endif
-  esp_task_wdt_add(NULL);
+  // Use Arduino's enableLoopWDT() so main.cpp automatically feeds the watchdog
+  // on every loop() iteration — prevents false WDT crashes if user omits handle(),
+  // while still catching real infinite loops / freezes and triggering auto-rollback!
+  enableLoopWDT();
+}
+
+void scheduleBackgroundRollbackConfirm(OtaManager* mgr) {
+  if (g_rollbackTimer) return;
+  esp_timer_create_args_t args = {};
+  args.callback = &rollbackTimerCallback;
+  args.arg      = mgr;
+  args.name     = "ota_confirm";
+  if (esp_timer_create(&args, &g_rollbackTimer) == ESP_OK) {
+    // Fire strictly AFTER WDT_TIMEOUT_SEC (12s > 10s) so any infinite loop in
+    // setup()/loop() gets caught by the watchdog and rolled back FIRST!
+    const uint64_t delayUs = (uint64_t)(WDT_TIMEOUT_SEC + 2) * 1000000ULL;
+    esp_timer_start_once(g_rollbackTimer, delayUs);
+  }
 }
 }  // namespace
 
@@ -39,7 +66,7 @@ void OnTheAirEspFacade::setArmedCallback(IsArmedCallback fn) {
   isArmedFn_ = fn;
 }
 
-void OnTheAirEspFacade::begin(unsigned long serialBaud) {
+void OnTheAirEspFacade::begin(unsigned long serialBaud, bool blockInOtaMode) {
   if (disarmFn_) {
     disarmFn_();
   }
@@ -62,14 +89,26 @@ void OnTheAirEspFacade::begin(unsigned long serialBaud) {
 
   if (ota_.shouldEnterMaintenanceMode()) {
     ota_.startMaintenanceMode();
+    if (blockInOtaMode) {
+      // Dedicated Maintenance Loop: keeps WDT fed, serves Captive Portal,
+      // Web Console, and Arduino IDE Network Port indefinitely without ever
+      // running user setup()/loop() code!
+      for (;;) {
+        feedLoopWDT();
+        ota_.serviceRollbackConfirmation();
+        ota_.handleClient();
+        delay(2);
+      }
+    }
   } else {
     ota_.disableRadiosForRunMode();
     digitalWrite(PIN_STATUS_LED, HIGH);
+    scheduleBackgroundRollbackConfirm(&ota_);
   }
 }
 
 bool OnTheAirEspFacade::handle() {
-  esp_task_wdt_reset();
+  feedLoopWDT();
   ota_.serviceRollbackConfirmation();
 
   if (ota_.isMaintenanceActive()) {

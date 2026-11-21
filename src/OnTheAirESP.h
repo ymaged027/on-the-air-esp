@@ -6,20 +6,18 @@
 #include "ota_manager.h"
 
 // =============================================================================
-// OnTheAirESP — 3-Line Plug-and-Play OTA Facade for ANY ESP32 Arduino Sketch
+// OnTheAirESP — 1-Line Plug-and-Play OTA Facade for ANY ESP32 Arduino Sketch
 // =============================================================================
-// Minimal usage:
+// Minimal usage (literally ONE line!):
 //   #include <OnTheAirESP.h>
 //
 //   void setup() {
 //     OnTheAirESP.begin();
-//     if (OnTheAirESP.isOtaMode()) return;
-//     // your normal setup() code...
+//     // your normal setup() code (never runs in Maintenance Mode!)
 //   }
 //
 //   void loop() {
-//     if (OnTheAirESP.handle()) return;
-//     // your normal loop() code...
+//     // your normal loop() code (WDT & rollback handled automatically!)
 //   }
 // =============================================================================
 
@@ -31,16 +29,17 @@ public:
   void setDisarmCallback(DisarmCallback fn);
   void setArmedCallback(IsArmedCallback fn);
 
-  // Initialize watchdog, load live NVS params, and enter either:
-  //   - Maintenance Mode (Wi-Fi AP + Captive Portal + Arduino IDE OTA)
-  //   - Normal Run Mode  (Wi-Fi & Bluetooth 100% OFF)
+  // Initialize Hardware Watchdog, load live NVS params, and enter either:
+  //   - Maintenance Mode (Wi-Fi AP + Captive Portal + Arduino IDE OTA).
+  //     When blockInOtaMode=true (default), begin() stays in its built-in
+  //     Maintenance Loop forever until flashed or rebooted, so your normal
+  //     setup()/loop() never accidentally execute and WDT never triggers!
+  //   - Normal Run Mode (Wi-Fi & Bluetooth 100% OFF, enableLoopWDT() active).
   // Pass serialBaud = 0 if you call Serial.begin() yourself.
-  void begin(unsigned long serialBaud = 115200);
+  void begin(unsigned long serialBaud = 115200, bool blockInOtaMode = true);
 
-  // Call at the top of loop().
-  // Feeds Hardware Watchdog, confirms OTA rollback after stability window,
-  // and services HTTP/Captive Portal/ArduinoOTA when in Maintenance Mode.
-  // Returns true if in Maintenance Mode (so your loop can simply `return;`).
+  // Optional in loop() (not required when blockInOtaMode=true, kept for compatibility
+  // and for non-blocking mode).
   bool handle();
 
   // True when running in Maintenance / OTA Mode (Wi-Fi active, outputs disarmed).
@@ -58,7 +57,7 @@ private:
   AppParamsStore paramsStore_;
   AppParams      params_;
   OtaManager     ota_;
-  DisarmCallback disarmFn_  = nullptr;
+  DisarmCallback disarmFn_   = nullptr;
   IsArmedCallback isArmedFn_ = nullptr;
 };
 

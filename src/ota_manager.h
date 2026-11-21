@@ -23,6 +23,7 @@ public:
   void startMaintenanceMode();
   void handleClient();
   void serviceRollbackConfirmation();
+  void confirmRollbackNow();
 
   float readBatteryVoltage() const;
   const char* getOtaStateString() const;

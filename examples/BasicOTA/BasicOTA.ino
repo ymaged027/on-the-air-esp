@@ -1,5 +1,5 @@
 // =============================================================================
-// OnTheAirESP — Minimal 3-Line Example (ESP32 NodeMCU-32S)
+// OnTheAirESP — Minimal 1-Line Example (ESP32 NodeMCU-32S)
 // =============================================================================
 // Credentials (defaults from library):
 //   • Wi-Fi SSID / Arduino IDE Port : MTR-OTA
@@ -14,7 +14,6 @@
 
 void setup() {
   OnTheAirESP.begin();
-  if (OnTheAirESP.isOtaMode()) return;
 
   // --- Your normal setup() code goes below (Wi-Fi & BT are 100% OFF) ---
   Serial.println(F("[APP] Running with NVS params:"));
@@ -22,8 +21,6 @@ void setup() {
 }
 
 void loop() {
-  if (OnTheAirESP.handle()) return;
-
   // --- Your normal loop() code goes below ---
   // Live-tuned values: OnTheAirESP.params().speedMax, .sensorThreshold, .mode, etc.
   delay(10);
