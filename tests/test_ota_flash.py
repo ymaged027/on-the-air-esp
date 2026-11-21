@@ -225,8 +225,13 @@ class OtaFlashTests(unittest.TestCase):
 
             ide_conn, _ = ide_srv.accept()
             ide_conn.settimeout(3)
-            from_esp = ide_conn.recv(64)
-            self.assertEqual(from_esp, b"HELLO FROM ESP32\n")
+            received = b""
+            while b"HELLO FROM ESP32\n" not in received:
+                chunk = ide_conn.recv(256)
+                if not chunk:
+                    break
+                received += chunk
+            self.assertIn(b"HELLO FROM ESP32\n", received)
             ide_conn.sendall(b"status\n")
             t_esp.join(timeout=3)
             self.assertEqual(bytes(esp_received), b"status\n")
@@ -245,6 +250,36 @@ class OtaFlashTests(unittest.TestCase):
         self.assertIn("describe", types)
         self.assertIn("open", types)
         self.assertIn("quit", types)
+
+    def test_pluggable_ota_monitor_instant_open_when_offline(self) -> None:
+        # Even when ESP32 is unreachable, OPEN must reply OK immediately so Arduino IDE never times out
+        ide_srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ide_srv.bind(("127.0.0.1", 0))
+        ide_srv.listen(1)
+        ide_port = ide_srv.getsockname()[1]
+
+        mon = ota_monitor.PluggableOtaMonitor()
+        buf = io.StringIO()
+        orig_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            mon.handle_command('HELLO 1 "arduino-cli"')
+            mon.handle_command("CONFIGURE port 1")  # closed local port
+            mon.handle_command(f"OPEN 127.0.0.1:{ide_port} 127.0.0.1")
+            ide_conn, _ = ide_srv.accept()
+            ide_conn.settimeout(3)
+            msg = ide_conn.recv(512)
+            self.assertIn(b"OTA Monitor", msg)
+            mon.handle_command("CLOSE")
+            mon.handle_command("QUIT")
+            ide_conn.close()
+        finally:
+            sys.stdout = orig_stdout
+            ide_srv.close()
+
+        events = [json.loads(line) for line in buf.getvalue().splitlines() if line.strip()]
+        open_ev = next(e for e in events if e["eventType"] == "open")
+        self.assertEqual(open_ev["message"], "OK")
 
 
 if __name__ == "__main__":
