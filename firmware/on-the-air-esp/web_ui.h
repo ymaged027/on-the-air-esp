@@ -2,13 +2,13 @@
 
 #include <Arduino.h>
 
-// Single-page Sumobot Pit Console stored in PROGMEM (zero SPIFFS/LittleFS upload required).
+// Single-page Pit Console stored in PROGMEM (auto-opens via Captive Portal!).
 static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sumobot OTA Pit Console</title>
+<title>On The Air ESP — Pit Console</title>
 <style>
   :root{--bg:#0d1117;--card:#161b22;--bd:#30363d;--tx:#e6edf3;--mut:#8b949e;--acc:#58a6ff;--ok:#3fb950;--warn:#d29922;--err:#f85149}
   *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
@@ -22,21 +22,21 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .b-err{background:#2d1215;color:var(--err);border-color:#da3633}
   .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:14px}
   .card h2{margin:0 0 12px;font-size:1.02rem}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
   .kv{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px}
-  .kv .k{color:var(--mut);font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
+  .kv .k{color:var(--mut);font-size:.73rem;text-transform:uppercase;letter-spacing:.04em}
   .kv .v{font-size:1.02rem;font-weight:600;margin-top:3px;word-break:break-all}
   label{display:block;font-size:.84rem;color:var(--mut);margin-bottom:4px}
   input,select{width:100%;padding:8px 10px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:7px;font-size:.92rem}
   .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px}
-  .btn{background:var(--acc);color:#0d1117;border:none;border-radius:7px;padding:9px 14px;font-weight:700;cursor:pointer;font-size:.9rem}
+  .btn{background:var(--acc);color:#0d1117;border:none;border-radius:7px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:.92rem}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .btn-sec{background:#21262d;color:var(--tx);border:1px solid var(--bd)}
   .btn-warn{background:var(--warn);color:#0d1117}
-  .btn-err{background:var(--err);color:#fff}
   .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-  .drop{border:2px dashed var(--bd);border-radius:10px;padding:18px;text-align:center;margin:10px 0;background:var(--bg)}
-  .drop.over{border-color:var(--acc)}
+  .drop{border:2px dashed var(--bd);border-radius:10px;padding:22px;text-align:center;margin:10px 0;background:var(--bg);cursor:pointer;transition:border-color .15s,background .15s}
+  .drop.over{border-color:var(--acc);background:#0c1929}
+  .file-name{margin-top:8px;font-size:.88rem;color:var(--acc);font-weight:600}
   .bar-bg{height:12px;background:var(--bg);border:1px solid var(--bd);border-radius:999px;overflow:hidden;margin-top:10px;display:none}
   .bar{height:100%;width:0;background:var(--acc);transition:width .15s}
   .msg{margin-top:10px;font-size:.88rem;padding:9px 11px;border-radius:7px;display:none}
@@ -48,11 +48,11 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <body>
 <div class="wrap">
   <h1>
-    <span id="titleId">Sumobot</span>
+    <span id="titleId">On The Air ESP</span>
     <span class="badge b-ok" id="badgeArmed">DISARMED</span>
     <span class="badge b-warn" id="badgeOta">CHECKING...</span>
   </h1>
-  <p class="sub">ESP32 NodeMCU-32S Wireless Pit Console &bull; Wi-Fi active in Maintenance Mode only</p>
+  <p class="sub">ESP32 NodeMCU-32S Wireless Pit Console &bull; Wi-Fi turns 100% OFF in Match Mode</p>
 
   <div class="card">
     <h2>Robot Telemetry</h2>
@@ -66,17 +66,19 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="tokenCard">
     <h2>Security Token</h2>
-    <label for="token">Pit Auth Token (required for Flash, Save Params, Rollback)</label>
-    <input id="token" type="password" placeholder="Enter OTA_AUTH_TOKEN from config.h">
+    <label for="token">Saved automatically in this browser (from <code>OTA_AUTH_TOKEN</code> in config.h)</label>
+    <input id="token" type="password" placeholder="Enter OTA_AUTH_TOKEN">
   </div>
 
   <div class="card">
     <h2>Over-The-Air Firmware Flash (.bin)</h2>
     <div class="drop" id="dropZone">
-      <div style="margin-bottom:8px;color:var(--mut)">Export from Arduino IDE: <b>Sketch &rarr; Export Compiled Binary</b></div>
-      <input id="binFile" type="file" accept=".bin">
+      <div><b>Drag &amp; drop</b> <code>on-the-air-esp.ino.bin</code> here, or <b>click to choose</b></div>
+      <div style="font-size:.8rem;color:var(--mut);margin-top:4px">Arduino IDE: Sketch &rarr; Export Compiled Binary (pick <b>.ino.bin</b>)</div>
+      <div class="file-name" id="fileLabel"></div>
+      <input id="binFile" type="file" accept=".bin" style="display:none">
     </div>
     <div class="actions">
       <button class="btn" id="btnFlash">Flash Firmware</button>
@@ -86,7 +88,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   </div>
 
   <div class="card">
-    <h2>Live Parameter Tuning (NVS Flash &mdash; No Recompile!)</h2>
+    <h2>Live Parameter Tuning (Instant &mdash; No Recompile!)</h2>
     <div class="row">
       <div><label>Search Speed (0-255)</label><input id="pSearch" type="number" min="0" max="255"></div>
       <div><label>Attack Speed (0-255)</label><input id="pAttack" type="number" min="0" max="255"></div>
@@ -128,6 +130,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <script>
 const $ = id => document.getElementById(id);
 let robotId = "";
+let selectedFile = null;
 
 function showMsg(el, cls, txt) {
   el.className = "msg " + cls;
@@ -139,6 +142,28 @@ function getToken() {
   localStorage.setItem("sumo_ota_token", t);
   return t;
 }
+
+function setFile(f) {
+  selectedFile = f;
+  if (!f) { $("fileLabel").textContent = ""; return; }
+  $("fileLabel").textContent = f.name + " (" + Math.round(f.size / 1024) + " KB)";
+  if (/bootloader|partitions|boot_app0/i.test(f.name)) {
+    showMsg($("otaMsg"), "err", "Wrong file! Pick on-the-air-esp.ino.bin (NOT bootloader or partitions).");
+  } else {
+    $("otaMsg").className = "msg";
+  }
+}
+
+const dz = $("dropZone");
+dz.onclick = () => $("binFile").click();
+$("binFile").onchange = e => setFile(e.target.files[0] || null);
+dz.ondragover = e => { e.preventDefault(); dz.classList.add("over"); };
+dz.ondragleave = () => dz.classList.remove("over");
+dz.ondrop = e => {
+  e.preventDefault();
+  dz.classList.remove("over");
+  if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+};
 
 async function fetchStatus() {
   try {
@@ -152,6 +177,7 @@ async function fetchStatus() {
     $("stBatt").textContent = d.batteryMonitor ? (d.batteryV.toFixed(2) + " V") : "Disabled";
     $("stHeap").textContent = Math.round(d.freeHeap / 1024) + " KB";
     $("stUp").textContent = d.uptimeSec + " s";
+    $("tokenCard").style.display = (d.authRequired === false) ? "none" : "block";
 
     const ba = $("badgeArmed");
     ba.textContent = d.armed ? "ARMED (LOCKED)" : "DISARMED";
@@ -160,7 +186,8 @@ async function fetchStatus() {
     const bo = $("badgeOta");
     bo.textContent = d.otaState;
     bo.className = "badge " + (d.otaState === "VALID" ? "b-ok" : "b-warn");
-  } catch (e) {}
+    return d;
+  } catch (e) { return null; }
 }
 
 async function fetchParams() {
@@ -177,10 +204,33 @@ async function fetchParams() {
   } catch (e) {}
 }
 
-$("btnFlash").onclick = () => {
-  const file = $("binFile").files[0];
-  if (!file) return showMsg($("otaMsg"), "err", "Select a .bin firmware file first.");
+function waitReconnect() {
+  let tries = 0;
+  const iv = setInterval(async () => {
+    tries++;
+    const d = await fetchStatus();
+    if (d && d.ok) {
+      clearInterval(iv);
+      showMsg($("otaMsg"), "ok", "Back online! Running v" + d.version + " on slot " + d.partition + " (" + d.otaState + ").");
+    } else if (tries > 15) {
+      clearInterval(iv);
+    }
+  }, 1500);
+}
+
+$("btnFlash").onclick = async () => {
+  const file = selectedFile || $("binFile").files[0];
+  if (!file) return showMsg($("otaMsg"), "err", "Drop or select on-the-air-esp.ino.bin first.");
   if (!file.name.endsWith(".bin")) return showMsg($("otaMsg"), "err", "File must end with .bin");
+  if (/bootloader|partitions|boot_app0/i.test(file.name)) {
+    return showMsg($("otaMsg"), "err", "Wrong file! Pick on-the-air-esp.ino.bin (NOT bootloader or partitions).");
+  }
+
+  // Quick magic-byte check right in browser (ESP32 app images start with 0xE9)
+  const head = new Uint8Array(await file.slice(0, 1).arrayBuffer());
+  if (head[0] !== 0xE9) {
+    return showMsg($("otaMsg"), "err", "Not a valid ESP32 app image (missing 0xE9 header).");
+  }
 
   const tok = getToken();
   const fd = new FormData();
@@ -189,7 +239,7 @@ $("btnFlash").onclick = () => {
   $("barBg").style.display = "block";
   $("bar").style.width = "0%";
   $("btnFlash").disabled = true;
-  showMsg($("otaMsg"), "info", "Uploading " + file.name + " (" + Math.round(file.size/1024) + " KB)...");
+  showMsg($("otaMsg"), "info", "Uploading " + file.name + " (" + Math.round(file.size / 1024) + " KB)...");
 
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/ota", true);
@@ -197,10 +247,7 @@ $("btnFlash").onclick = () => {
   if (robotId) xhr.setRequestHeader("X-Target-Robot", robotId);
 
   xhr.upload.onprogress = e => {
-    if (e.lengthComputable) {
-      const pct = Math.round((e.loaded / e.total) * 100);
-      $("bar").style.width = pct + "%";
-    }
+    if (e.lengthComputable) $("bar").style.width = Math.round((e.loaded / e.total) * 100) + "%";
   };
   xhr.onload = () => {
     $("btnFlash").disabled = false;
@@ -208,7 +255,8 @@ $("btnFlash").onclick = () => {
       const res = JSON.parse(xhr.responseText);
       if (xhr.status === 200 && res.ok) {
         $("bar").style.width = "100%";
-        showMsg($("otaMsg"), "ok", "Flash OK! Rebooting into new partition... Reconnect in ~5s.");
+        showMsg($("otaMsg"), "ok", "Flash OK! Robot is rebooting into the new slot...");
+        setTimeout(waitReconnect, 2500);
       } else {
         showMsg($("otaMsg"), "err", "Flash rejected: " + (res.error || xhr.statusText));
       }

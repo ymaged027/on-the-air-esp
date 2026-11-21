@@ -1,18 +1,42 @@
 # On The Air ESP (`on-the-air-esp`)
 
-Competition-grade **Over-The-Air (OTA) Wi-Fi firmware flashing** and **live parameter tuning** for **ESP32 NodeMCU-32S** Sumobots using **Arduino IDE** with **zero external libraries** and **zero extra hardware cost (0 EGP)**.
+**Plug-and-play Over-The-Air (OTA) Wi-Fi flashing & live tuning** for **ESP32 NodeMCU-32S** Sumobots using **Arduino IDE** — **0 EGP**, **zero external libraries**, and **automatic anti-brick rollback**.
 
 ---
 
-## Why This Instead of Basic `ArduinoOTA`?
+## 30-Second Setup
 
-Naive `ArduinoOTA` examples break easily at competitions (UDP/mDNS blocked by Windows firewalls, no rollback if bad code crashes, Wi-Fi left on during matches violating RF rules). This infrastructure solves every one of those failure modes:
+1. Open `firmware/on-the-air-esp/on-the-air-esp.ino` in **Arduino IDE**.
+2. Write your Sumobot code right at the top inside `mySumoSetup()` and `mySumoLoop()`.
+3. *(Optional)* Change Wi-Fi name/password/pins in the `config.h` tab.
+4. Select **Tools → Board → ESP32 Arduino → NodeMCU-32S** and upload **once via USB**.
 
-- **True Anti-Brick Automatic Rollback:** Overrides Arduino-ESP32's weak `verifyRollbackLater()` hook and runs a Hardware Watchdog (`esp_task_wdt`) + 4-second self-test window. If a mid-competition push crashes or hangs, the ESP32 bootloader **automatically rolls back** to the last working firmware slot (`app0` ↔ `app1`).
-- **Competition RF Compliant:** Wi-Fi and Bluetooth are **100% powered off (`WIFI_OFF` + `btStop`)** in Match Mode. Wireless flashing only runs in explicit **Maintenance Mode** (via a pit switch on `GPIO 33` or the built-in `BOOT` button during boot).
-- **Zero-Router Pit Operation:** Robot hosts its own WPA2 Wi-Fi network (`192.168.4.1`) with a sleek built-in **Web Pit Console** (stored in `PROGMEM`—no SPIFFS/LittleFS plugin needed). Works from any laptop or smartphone browser.
-- **Target-Mismatch & Safety Interlocks:** Rejects OTA updates if motors are armed, battery is too low, auth token is wrong, MD5 fails, or a `.bin` was compiled for a different Sumobot ID.
-- **2-Second Live Tuning (NVS Flash):** Adjust speeds, line thresholds, opponent range, start delay, and strategy over Wi-Fi without recompiling or flashing!
+---
+
+## 3 Effortless Ways to Flash Wirelessly (No Cables!)
+
+First, put your Sumobot into **Maintenance Mode** (close the `GPIO 33` Pit Switch at boot, *or* press the onboard `BOOT` button during the 2.5 s fast-blink window) and connect to **`SUMO-01-OTA`** Wi-Fi.
+
+### Option 1 — 1-Click Double-Click (`flash.bat`, Fastest on Windows)
+Save your code in Arduino IDE (`Ctrl+S`), then **double-click `flash.bat`**!
+It automatically compiles, checks the target robot ID & MD5, flashes over Wi-Fi, and verifies the reboot—no manual `.bin` exporting or typing commands!
+
+### Option 2 — Direct Inside Arduino IDE
+Select **Tools → Port → Network Ports → `sumo-01 at 192.168.4.1`** and hit the normal **Upload (→)** button right inside Arduino IDE!
+
+### Option 3 — Phone or Browser (Auto-Popup Captive Portal)
+Connecting to **`SUMO-01-OTA`** automatically pops open the **Pit Console** (`http://192.168.4.1`, or double-click `open-console.bat`):
+- **2-second live tuning** (speeds, line threshold, opponent range, start delay, strategy) saved to NVS flash—no recompile!
+- **Drag-and-drop `.bin` flashing** with progress bar and auto-reconnect.
+- **1-click Rollback** to the previous working firmware slot.
+
+---
+
+## Safety Built In for Competitions
+
+- **Wi-Fi 100% OFF in Match Mode:** Calls `WiFi.mode(WIFI_OFF)` + `btStop()` so you never violate Sumobot RF rules or get Wi-Fi interrupt jitter.
+- **Automatic Anti-Brick Rollback:** Overrides Arduino-ESP32's `verifyRollbackLater()` + runs a 10 s Hardware Watchdog + 4 s stability check. If bad code crashes or freezes, the ESP32 **automatically boots back into your last working firmware**.
+- **Safety Interlocks:** Blocks OTA if motors are armed, battery is too low, token is wrong, MD5 fails, or a `.bin` was built for a different Sumobot ID.
 
 ---
 
@@ -20,17 +44,19 @@ Naive `ArduinoOTA` examples break easily at competitions (UDP/mDNS blocked by Wi
 
 ```text
 on-the-air-esp/
+├── flash.bat                  # Double-click: auto-compile + wireless flash!
+├── open-console.bat           # Double-click: opens Pit Console in browser
 ├── firmware/
-│   └── on-the-air-esp/           # Open on-the-air-esp.ino directly in Arduino IDE
-│       ├── on-the-air-esp.ino    # Main sketch (Match Mode vs Maintenance Mode + WDT)
-│       ├── config.h           # Robot ID, version, pins, Wi-Fi creds & auth token
-│       ├── ota_manager.h/.cpp # HTTP OTA server, safety interlocks, auto-rollback
-│       ├── sumo_params.h/.cpp # Persistent NVS live-tunable Sumobot parameters
-│       └── web_ui.h           # Built-in Pit Console HTML/CSS/JS (PROGMEM)
+│   └── on-the-air-esp/        # Open on-the-air-esp.ino in Arduino IDE
+│       ├── on-the-air-esp.ino # Put your Sumobot code at the top!
+│       ├── config.h           # Robot ID, Wi-Fi creds, token, pins
+│       ├── ota_manager.h/.cpp # Captive Portal, HTTP OTA, ArduinoOTA, rollback
+│       ├── sumo_params.h/.cpp # Live-tunable NVS parameters
+│       └── web_ui.h           # Drag-and-drop Pit Console (PROGMEM)
 ├── tools/
-│   └── sumo_flash.py          # Zero-dependency Python 3 CLI flasher & tuner
+│   └── sumo_flash.py          # Zero-dependency CLI (push / status / params / rollback)
 ├── tests/
-│   └── test_sumo_flash.py     # Unit tests for sumo_flash.py (mock Sumobot server)
+│   └── test_sumo_flash.py     # Unit tests (python -m unittest discover -s tests -v)
 └── docs/
     ├── WIRING.md              # NodeMCU-32S pinout & ESP32 ADC2/strapping gotchas
     └── COMPETITION_CHECKLIST.md
@@ -38,66 +64,16 @@ on-the-air-esp/
 
 ---
 
-## Quick Start (Arduino IDE)
-
-### 1. First-Time USB Setup
-1. Install the official **esp32** board package by Espressif in Arduino IDE Boards Manager.
-2. Open `firmware/on-the-air-esp/on-the-air-esp.ino` in Arduino IDE.
-3. Edit `config.h`: set your `ROBOT_ID`, `OTA_AP_SSID`, `OTA_AP_PASS`, and `OTA_AUTH_TOKEN`.
-4. Select **Tools → Board → ESP32 Arduino → NodeMCU-32S** (uses the default 4 MB dual-OTA partition table automatically).
-5. Upload once over USB.
-
-### 2. Enter Maintenance Mode (Wireless Pit Mode)
-Use either method:
-- **Zero-wiring method:** Power on the NodeMCU-32S. While the blue LED (`GPIO 2`) fast-blinks for 2.5 seconds, press and hold the built-in **`BOOT` button** for 0.5 s.
-- **Recommended competition method:** Close a toggle switch / jumper between **`GPIO 33` and `GND`** before powering on (and set `BOOT_WINDOW_MS 0` in `config.h` for zero match boot delay).
-
-When the blue LED switches to a **slow heartbeat blink**, Maintenance Mode is active and motors are disarmed.
-
-### 3. Flash Wirelessly (Browser or CLI)
-1. Connect your laptop or phone to Wi-Fi **`SUMO-01-OTA`**.
-2. In Arduino IDE, click **Sketch → Export Compiled Binary** (creates `on-the-air-esp.ino.bin` inside the sketch's `build/` folder).
-3. **Option A — Web Console:** Open **`http://192.168.4.1`**, enter your auth token, pick `on-the-air-esp.ino.bin`, and click **Flash Firmware**.
-4. **Option B — Python CLI (zero pip dependencies):**
-   ```bash
-   # Check robot telemetry & live params
-   python tools/sumo_flash.py status --host 192.168.4.1
-
-   # Inspect binary target tag & hashes offline
-   python tools/sumo_flash.py inspect path/to/on-the-air-esp.ino.bin
-
-   # Flash with automatic target-ID verification, MD5 check, and post-reboot confirmation
-   python tools/sumo_flash.py flash path/to/on-the-air-esp.ino.bin --token sumo-pit-2026
-
-   # Live-tune parameters in 1 second without reflashing
-   python tools/sumo_flash.py params --token sumo-pit-2026 --set attackSpeed=245 strategy=1
-
-   # Instant wireless rollback to previous partition
-   python tools/sumo_flash.py rollback --token sumo-pit-2026
-   ```
-
----
-
-## HTTP API Reference
-
-| Endpoint | Method | Auth Header | Purpose |
-| --- | --- | --- | --- |
-| `/` | `GET` | — | Built-in Web Pit Console |
-| `/api/status` | `GET` | — | JSON telemetry (`robotId`, `version`, `partition`, `otaState`, `armed`, `batteryV`, `freeHeap`, `uptimeSec`) |
-| `/api/params` | `GET` | — | Current live NVS parameters |
-| `/api/params` | `POST` | `X-OTA-Token` | Update NVS parameters (form-encoded) |
-| `/api/params/reset` | `POST` | `X-OTA-Token` | Restore default NVS parameters |
-| `/api/ota` | `POST` | `X-OTA-Token` | Multipart `.bin` upload (supports `X-Target-Robot` and `X-Firmware-MD5`) |
-| `/api/rollback` | `POST` | `X-OTA-Token` | Roll back to previous OTA slot & reboot |
-| `/api/reboot` | `POST` | `X-OTA-Token` | Reboot robot |
-
----
-
-## Running Tests
+## Terminal CLI Cheat Sheet (Zero `pip install`)
 
 ```bash
-python -m unittest discover -s tests -v
+python tools/sumo_flash.py push                                  # Compile + flash wirelessly
+python tools/sumo_flash.py status                                # Check version, slot & params
+python tools/sumo_flash.py params --set attackSpeed=245 strategy=1  # Live-tune in 1 second
+python tools/sumo_flash.py rollback                              # Instant wireless rollback
 ```
+
+*(Token is automatically read from `firmware/on-the-air-esp/config.h` — no need to pass `--token`!)*
 
 ---
 

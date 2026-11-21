@@ -162,6 +162,13 @@ class SumoFlashTests(unittest.TestCase):
         rc2 = sumo_flash.main(["rollback", "--host", self.host, "--token", "secret-pin"])
         self.assertEqual(rc2, 0)
 
+    def test_read_token_from_config(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Path(td) / "config.h"
+            cfg.write_text('#define OTA_AUTH_TOKEN "my-pit-pin"\n', encoding="utf-8")
+            self.assertEqual(sumo_flash.read_token_from_config(cfg), "my-pit-pin")
+        self.assertEqual(sumo_flash.read_token_from_config(), "sumo-pit-2026")
+
 
 if __name__ == "__main__":
     unittest.main()

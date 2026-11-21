@@ -4,7 +4,8 @@
 
 #include <WiFi.h>
 #include <WebServer.h>
-#include <ESPmDNS.h>
+#include <DNSServer.h>
+#include <ArduinoOTA.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
@@ -13,19 +14,18 @@
 // =============================================================================
 // CRITICAL: Override Arduino-ESP32's weak verifyRollbackLater()
 // =============================================================================
-// By default, Arduino-ESP32's initArduino() marks a newly-flashed OTA image as
-// VALID *before* setup() even runs — which silently disables automatic rollback!
-// Returning true here keeps the new partition in ESP_OTA_IMG_PENDING_VERIFY
-// until OtaManager::serviceRollbackConfirmation() confirms healthy execution.
+// Keeps newly-flashed OTA images in ESP_OTA_IMG_PENDING_VERIFY until
+// serviceRollbackConfirmation() proves the firmware stayed healthy.
 extern "C" bool verifyRollbackLater() {
   return true;
 }
 
-// Keep metadata string inside the compiled .bin so sumo_flash.py can inspect it.
+// Compiled into .rodata of the .bin so sumo_flash.py & Web UI can verify target ID.
 const char EMBEDDED_FW_META[] = FW_META_STRING;
 
 namespace {
 WebServer g_server(80);
+DNSServer g_dnsServer;
 OtaManager* g_instance = nullptr;
 }  // namespace
 
@@ -47,7 +47,6 @@ void OtaManager::begin(SumoParams* params,
   pinMode(PIN_OTA_SWITCH, INPUT_PULLUP);
   pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
 
-  // Immediately inspect OTA partition state
   const esp_partition_t* running = esp_ota_get_running_partition();
   esp_ota_img_states_t state;
   if (running && esp_ota_get_state_partition(running, &state) == ESP_OK) {
@@ -58,19 +57,16 @@ void OtaManager::begin(SumoParams* params,
 }
 
 bool OtaManager::shouldEnterMaintenanceMode() {
-  // 1. Dedicated Pit/OTA physical switch (LOW = Maintenance Mode)
   if (digitalRead(PIN_OTA_SWITCH) == LOW) {
-    delay(25);  // debounce
+    delay(25);
     if (digitalRead(PIN_OTA_SWITCH) == LOW) {
       Serial.println(F("[OTA] Pit switch ACTIVE -> Maintenance Mode"));
       return true;
     }
   }
 
-  // 2. Optional boot window using the built-in NodeMCU-32S BOOT button (GPIO 0)
-  //    (zero extra wiring needed). Hold BOOT after power-on while LED fast-blinks.
 #if BOOT_WINDOW_MS > 0
-  Serial.printf("[OTA] Hold BOOT (GPIO %d) within %d ms for Maintenance Mode...\n",
+  Serial.printf("[OTA] Press BOOT (GPIO %d) within %d ms for Maintenance Mode...\n",
                 PIN_BOOT_BTN, BOOT_WINDOW_MS);
   uint32_t start = millis();
   uint32_t heldSince = 0;
@@ -99,6 +95,7 @@ bool OtaManager::shouldEnterMaintenanceMode() {
 
 void OtaManager::disableRadiosForMatch() {
   maintenanceActive_ = false;
+  dnsActive_         = false;
   WiFi.disconnect(true, true);
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -107,7 +104,6 @@ void OtaManager::disableRadiosForMatch() {
 }
 
 void OtaManager::startMaintenanceMode() {
-  // Always force motors to a safe disarmed state before turning on Wi-Fi
   if (disarmFn_) {
     disarmFn_();
   }
@@ -127,9 +123,6 @@ void OtaManager::startMaintenanceMode() {
     connectedSta = true;
     Serial.print(F("[OTA] Connected STA IP: "));
     Serial.println(WiFi.localIP());
-    if (MDNS.begin(OTA_MDNS_HOST)) {
-      Serial.printf("[OTA] mDNS ready: http://%s.local\n", OTA_MDNS_HOST);
-    }
   } else {
     Serial.println(F("[OTA] Pit Wi-Fi unavailable, falling back to SoftAP."));
   }
@@ -138,18 +131,55 @@ void OtaManager::startMaintenanceMode() {
   if (!connectedSta) {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(OTA_AP_SSID, OTA_AP_PASS, OTA_AP_CHANNEL);
-    Serial.printf("[OTA] SoftAP started: SSID='%s' IP=%s\n",
-                  OTA_AP_SSID, WiFi.softAPIP().toString().c_str());
+    IPAddress apIp = WiFi.softAPIP();
+    // Captive Portal: any domain resolves to 192.168.4.1 so phone/laptop opens Pit Console automatically!
+    g_dnsServer.start(53, "*", apIp);
+    dnsActive_ = true;
+    Serial.printf("[OTA] SoftAP ready: SSID='%s' IP=%s (Captive Portal ON)\n",
+                  OTA_AP_SSID, apIp.toString().c_str());
   }
 
   registerRoutes();
   g_server.begin();
+  startArduinoOta();
   maintenanceActive_ = true;
-  Serial.println(F("[OTA] Pit HTTP Console running on port 80."));
+  Serial.println(F("[OTA] Pit Console (HTTP :80) & Arduino IDE Network Port ready."));
+}
+
+void OtaManager::startArduinoOta() {
+  ArduinoOTA.setHostname(OTA_MDNS_HOST);
+  if (isAuthRequired()) {
+    ArduinoOTA.setPassword(OTA_AUTH_TOKEN);
+  }
+
+  ArduinoOTA.onStart([this]() {
+    if (isArmedFn_ && isArmedFn_()) {
+      Serial.println(F("[ArduinoOTA] Blocked: robot is ARMED!"));
+      ESP.restart();
+    }
+    if (disarmFn_) disarmFn_();
+    Serial.println(F("[ArduinoOTA] Flashing from Arduino IDE..."));
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    esp_task_wdt_reset();
+    digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
+    (void)progress;
+    (void)total;
+  });
+
+  ArduinoOTA.onEnd([]() {
+    Serial.println(F("\n[ArduinoOTA] Flash complete! Rebooting..."));
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("[ArduinoOTA] Error[%u]\n", (unsigned)error);
+  });
+
+  ArduinoOTA.begin();
 }
 
 void OtaManager::registerRoutes() {
-  // IMPORTANT: Arduino WebServer ignores custom headers unless explicitly collected!
   const char* headerKeys[] = {"X-OTA-Token", "X-Target-Robot", "X-Firmware-MD5"};
   g_server.collectHeaders(headerKeys, 3);
 
@@ -165,29 +195,38 @@ void OtaManager::registerRoutes() {
       []() { g_instance->handleOtaUpload(); });
   g_server.on("/api/rollback", HTTP_POST, []() { g_instance->handleRollback(); });
   g_server.on("/api/reboot", HTTP_POST, []() { g_instance->handleReboot(); });
+
+  // Captive portal catch-all: redirect unknown non-API URLs to Pit Console
   g_server.onNotFound([]() {
-    g_server.send(404, "application/json", "{\"ok\":false,\"error\":\"Not found\"}");
+    if (g_server.uri().startsWith("/api/")) {
+      g_server.send(404, "application/json", "{\"ok\":false,\"error\":\"Not found\"}");
+      return;
+    }
+    g_server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
+    g_server.send(302, "text/plain", "");
   });
 }
 
 void OtaManager::handleClient() {
   if (!maintenanceActive_) return;
 
+  if (dnsActive_) {
+    g_dnsServer.processNextRequest();
+  }
   g_server.handleClient();
+  ArduinoOTA.handle();
 
-  // Slow heartbeat blink on onboard LED so team clearly sees Maintenance Mode
+  // Slow heartbeat blink so team immediately knows Maintenance Mode is active
   static uint32_t lastBlink = 0;
   if (millis() - lastBlink >= 600) {
     lastBlink = millis();
     digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
   }
 
-  // Execute deferred reboot or rollback after HTTP response finishes sending
   if (pendingRollback_ && millis() >= actionAtMs_) {
-    Serial.println(F("[OTA] Executing manual rollback & reboot..."));
+    Serial.println(F("[OTA] Executing rollback & reboot..."));
     Serial.flush();
     esp_ota_mark_app_invalid_rollback_and_reboot();
-    // If rollback fails (no other valid image), reboot normally
     ESP.restart();
   }
   if (pendingReboot_ && millis() >= actionAtMs_) {
@@ -203,7 +242,7 @@ void OtaManager::serviceRollbackConfirmation() {
   if (millis() - bootMs_ >= OTA_SELF_TEST_WINDOW_MS) {
     esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
     if (err == ESP_OK) {
-      Serial.println(F("[OTA] Self-test passed! New firmware marked VALID (rollback cancelled)."));
+      Serial.println(F("[OTA] Self-test passed! Firmware marked VALID (rollback cancelled)."));
     } else {
       Serial.printf("[OTA] Warning: mark_app_valid returned %d\n", (int)err);
     }
@@ -237,9 +276,17 @@ const char* OtaManager::getOtaStateString() const {
   }
 }
 
+bool OtaManager::isAuthRequired() const {
+  return strlen(OTA_AUTH_TOKEN) > 0;
+}
+
+bool OtaManager::isTokenValid(const String& provided) const {
+  if (!isAuthRequired()) return true;
+  return provided == OTA_AUTH_TOKEN;
+}
+
 bool OtaManager::checkAuthAndReply() {
-  String tok = g_server.header("X-OTA-Token");
-  if (tok != OTA_AUTH_TOKEN) {
+  if (!isTokenValid(g_server.header("X-OTA-Token"))) {
     g_server.send(401, "application/json", "{\"ok\":false,\"error\":\"Invalid OTA token\"}");
     return false;
   }
@@ -258,7 +305,7 @@ void OtaManager::handleStatus() {
   uint64_t mac = ESP.getEfuseMac();
 
   String json;
-  json.reserve(384);
+  json.reserve(416);
   json += '{';
   json += "\"ok\":true,";
   json += "\"robotId\":\"" ROBOT_ID "\",";
@@ -267,6 +314,7 @@ void OtaManager::handleStatus() {
   json += "\"chipId\":\"" + String((uint32_t)(mac >> 32), HEX) + String((uint32_t)mac, HEX) + "\",";
   json += "\"partition\":\"" + String(partLabel) + "\",";
   json += "\"otaState\":\"" + String(getOtaStateString()) + "\",";
+  json += "\"authRequired\":" + String(isAuthRequired() ? "true" : "false") + ',';
   json += "\"armed\":" + String(armed ? "true" : "false") + ',';
   json += "\"batteryMonitor\":" + String(BATTERY_MONITOR_ENABLED ? "true" : "false") + ',';
   json += "\"batteryV\":" + String(battV, 2) + ',';
@@ -334,14 +382,12 @@ void OtaManager::handleOtaUpload() {
     otaSuccess_    = false;
     otaError_      = "";
 
-    // 1. Auth token check
-    if (g_server.header("X-OTA-Token") != OTA_AUTH_TOKEN) {
+    if (!isTokenValid(g_server.header("X-OTA-Token"))) {
       otaError_ = "Invalid OTA token";
       Serial.println(F("[OTA] Rejected: invalid token"));
       return;
     }
 
-    // 2. Target robot ID mismatch check
     String targetRobot = g_server.header("X-Target-Robot");
     if (targetRobot.length() > 0 && targetRobot != ROBOT_ID) {
       otaError_ = "Target mismatch (expected " ROBOT_ID ", got " + targetRobot + ")";
@@ -349,14 +395,12 @@ void OtaManager::handleOtaUpload() {
       return;
     }
 
-    // 3. Armed safety interlock
     if (isArmedFn_ && isArmedFn_()) {
       otaError_ = "Motors are ARMED — disarm robot before flashing";
       Serial.println(F("[OTA] Rejected: motors armed"));
       return;
     }
 
-    // 4. Battery voltage floor check
 #if BATTERY_MONITOR_ENABLED
     float v = readBatteryVoltage();
     if (v < BATTERY_MIN_OTA_VOLTS) {
@@ -366,16 +410,13 @@ void OtaManager::handleOtaUpload() {
     }
 #endif
 
-    // Ensure motors are explicitly disarmed before flash erase/write starts
     if (disarmFn_) disarmFn_();
-
     Serial.printf("[OTA] Starting flash: %s\n", upload.filename.c_str());
 
-    // Optional end-to-end MD5 integrity check supplied by sumo_flash.py
     String md5 = g_server.header("X-Firmware-MD5");
     if (md5.length() == 32) {
       Update.setMD5(md5.c_str());
-      Serial.println("[OTA] MD5 verification enabled: " + md5);
+      Serial.println("[OTA] MD5 check enabled: " + md5);
     }
 
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
@@ -386,7 +427,6 @@ void OtaManager::handleOtaUpload() {
     otaAuthorized_ = true;
 
   } else if (upload.status == UPLOAD_FILE_WRITE) {
-    // Feed watchdog while streaming flash writes!
     esp_task_wdt_reset();
     digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
 
