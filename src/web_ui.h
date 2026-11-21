@@ -94,7 +94,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       <button class="btn btn-sec" id="btnCodeReset">Load Example</button>
       <button class="btn btn-sec" id="btnCodeDl">Download .ino</button>
     </div>
-    <div class="hint" id="studioHint">Install the silent background compiler once (<code>install-background-compiler.bat</code>) so compiling works automatically with no terminal window!</div>
+    <div class="hint" id="studioHint">Click the <b>MTR-OTA Web IDE</b> button inside Arduino IDE (or double-click <code>web-ide.bat</code>) to enable 1-click Compile &amp; Flash!</div>
     <div class="msg" id="codeMsg"></div>
     <pre class="term" id="buildOut" style="display:none;height:140px;margin-top:8px;color:#c9d1d9"></pre>
   </div>
@@ -259,15 +259,15 @@ async function detectStudio() {
         studioBase = base;
         $("studioBadge").textContent = "COMPILER READY";
         $("studioBadge").className = "badge b-ok";
-        $("studioHint").textContent = "Background compiler ready — paste code or drop any .ino file and click Compile & Flash!";
+        $("studioHint").textContent = "Connected to MTR-OTA Web IDE — paste code or drop any .ino file and click Compile & Flash!";
         return true;
       }
     } catch (e) {}
   }
   studioBase = "";
-  $("studioBadge").textContent = "COMPILER OFFLINE";
+  $("studioBadge").textContent = "WEB IDE OFFLINE";
   $("studioBadge").className = "badge b-warn";
-  $("studioHint").innerHTML = "Compiler not detected. Run <code>install-background-compiler.bat</code> once (or in Brave on 192.168.4.1, disable Shields for this page / bookmark <code>http://127.0.0.1:8080</code>).";
+  $("studioHint").innerHTML = "Launch Web IDE via the <b>MTR-OTA Web IDE</b> button in Arduino IDE (or <code>web-ide.bat</code>), then use <code>http://127.0.0.1:8080</code>.";
   return false;
 }
 
@@ -275,7 +275,7 @@ async function runCodeAction(doFlash, codeOverride = null) {
   const ok = await detectStudio();
   if (!ok) {
     return showMsg($("codeMsg"), "err",
-      "Background PC compiler is not reachable.\nRun install-background-compiler.bat once (starts silently at login with no terminal window), or bookmark http://127.0.0.1:8080 (Brave Shields blocks 192.168.4.1 -> localhost by default).");
+      "MTR-OTA Web IDE is not running.\nClick the 'MTR-OTA Web IDE' button inside Arduino IDE (or double-click web-ide.bat) to compile & flash .ino code.");
   }
 
   $("btnCodeFlash").disabled = true;

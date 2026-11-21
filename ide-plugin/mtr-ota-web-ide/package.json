@@ -1,0 +1,55 @@
+{
+  "name": "mtr-ota-web-ide",
+  "displayName": "MTR-OTA Web IDE Launcher",
+  "description": "Adds a 1-click button inside Arduino IDE 2 to launch MTR-OTA Web IDE (web-ide.bat).",
+  "version": "1.0.0",
+  "publisher": "ymaged027",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "mtr-ota.launchWebIde",
+        "title": "MTR-OTA: Launch Web IDE",
+        "icon": {
+          "light": "icon-light.svg",
+          "dark": "icon-dark.svg"
+        }
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "mtr-ota.launchWebIde",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "mtr-ota.launchWebIde",
+        "key": "ctrl+alt+w",
+        "mac": "cmd+alt+w"
+      }
+    ],
+    "configuration": {
+      "title": "MTR-OTA Web IDE",
+      "properties": {
+        "mtrOta.webIdeBatPath": {
+          "type": "string",
+          "default": "__WEB_IDE_BAT_PATH__",
+          "description": "Path to web-ide.bat (or tools/ota_studio.py) from the on-the-air-esp repository."
+        }
+      }
+    }
+  }
+}

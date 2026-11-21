@@ -32,6 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -131,6 +132,82 @@ def install_ide_monitor(
         local_txt.write_text("\n".join(filtered).strip() + "\n", encoding="utf-8")
         updated.append(local_txt)
     return updated
+
+
+def default_arduino_plugins_dir() -> Path:
+    """Return Arduino IDE 2.x user plugins folder (~/.arduinoIDE/plugins)."""
+    return Path.home() / ".arduinoIDE" / "plugins"
+
+
+def install_ide_plugin(
+    plugins_dir: Optional[Path] = None,
+    repo_root: Path = REPO_ROOT,
+) -> Path:
+    """
+    Package ide-plugin/mtr-ota-web-ide/ into a standard VS Code / Arduino IDE 2 .vsix
+    extension and install it into ~/.arduinoIDE/plugins/.
+    """
+    src_dir = repo_root / "ide-plugin" / "mtr-ota-web-ide"
+    if not src_dir.is_dir():
+        raise FileNotFoundError(f"IDE plugin source directory not found: {src_dir}")
+
+    target_dir = plugins_dir or default_arduino_plugins_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    vsix_path = target_dir / "mtr-ota-web-ide-1.0.0.vsix"
+
+    web_ide_bat = str((repo_root / "web-ide.bat").resolve())
+    pkg_text = (src_dir / "package.json").read_text(encoding="utf-8")
+    pkg_obj = json.loads(pkg_text)
+    pkg_obj["contributes"]["configuration"]["properties"]["mtrOta.webIdeBatPath"]["default"] = web_ide_bat
+    patched_pkg = json.dumps(pkg_obj, indent=2) + "\n"
+
+    content_types = (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension=".js" ContentType="application/javascript"/>'
+        '<Default Extension=".json" ContentType="application/json"/>'
+        '<Default Extension=".svg" ContentType="image/svg+xml"/>'
+        '<Default Extension=".md" ContentType="text/markdown"/>'
+        '<Default Extension=".vsixmanifest" ContentType="text/xml"/>'
+        "</Types>\n"
+    )
+    vsix_manifest = (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">\n'
+        "  <Metadata>\n"
+        '    <Identity Language="en-US" Id="mtr-ota-web-ide" Version="1.0.0" Publisher="ymaged027" />\n'
+        "    <DisplayName>MTR-OTA Web IDE Launcher</DisplayName>\n"
+        '    <Description xml:space="preserve">Adds a 1-click button inside Arduino IDE 2 to launch MTR-OTA Web IDE (web-ide.bat).</Description>\n'
+        "    <Categories>Other</Categories>\n"
+        "    <Properties>\n"
+        '      <Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.82.0" />\n'
+        '      <Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="workspace" />\n'
+        '      <Property Id="Microsoft.VisualStudio.Code.ExecutesCode" Value="true" />\n'
+        "    </Properties>\n"
+        "  </Metadata>\n"
+        "  <Installation>\n"
+        '    <InstallationTarget Id="Microsoft.VisualStudio.Code"/>\n'
+        "  </Installation>\n"
+        "  <Dependencies/>\n"
+        "  <Assets>\n"
+        '    <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />\n'
+        "  </Assets>\n"
+        "</PackageManifest>\n"
+    )
+
+    with zipfile.ZipFile(vsix_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("extension.vsixmanifest", vsix_manifest)
+        zf.writestr("extension/package.json", patched_pkg)
+        for fname in ("extension.js", "icon-dark.svg", "icon-light.svg"):
+            zf.write(src_dir / fname, f"extension/{fname}")
+
+    # Clear cached deployed copy so Arduino IDE 2 unpacks any updated VSIX cleanly on restart
+    deployed = target_dir.parent / "deployedPlugins" / "mtr-ota-web-ide-1.0.0"
+    if deployed.is_dir():
+        shutil.rmtree(deployed, ignore_errors=True)
+
+    return vsix_path
 
 
 def install_arduino_library(target_libraries_dir: Optional[Path] = None, repo_root: Path = REPO_ROOT) -> Path:
@@ -487,7 +564,16 @@ def cmd_install_lib(args: argparse.Namespace) -> int:
     updated = install_ide_monitor()
     for p in updated:
         print(f"Registered Arduino IDE OTA Monitor -> {p}")
-    print("Restart Arduino IDE (if open) to activate OnTheAirESP + wireless OTA Monitor.")
+    vsix = install_ide_plugin()
+    print(f"Installed Arduino IDE Web-IDE Button plugin -> {vsix}")
+    print("Restart Arduino IDE (if open) to activate OnTheAirESP, OTA Monitor, and the Web IDE button.")
+    return 0
+
+
+def cmd_install_plugin(args: argparse.Namespace) -> int:
+    vsix = install_ide_plugin()
+    print(f"Installed Arduino IDE Web-IDE Button plugin -> {vsix}")
+    print("Restart Arduino IDE to see the 'MTR-OTA Web IDE' toolbar & status-bar button (Ctrl+Alt+W).")
     return 0
 
 
@@ -515,10 +601,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 2
     ensure_esp32_core(cli)
 
-    print("[3/4] Registering wireless OTA Monitor in Arduino IDE...")
+    print("[3/4] Registering wireless OTA Monitor & Web-IDE button in Arduino IDE...")
     updated = install_ide_monitor()
     for p in updated:
         print(f"      Registered -> {p}")
+    vsix = install_ide_plugin()
+    print(f"      Plugin     -> {vsix}")
 
     if args.no_flash:
         print("[4/4] Skipping USB flash (--no-flash). Setup complete!")
@@ -705,6 +793,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_mon = sub.add_parser("install-monitor", help="Register wireless OTA Monitor inside Arduino IDE")
     p_mon.set_defaults(func=cmd_install_monitor)
+
+    p_plg = sub.add_parser("install-plugin", help="Install the 1-click 'MTR-OTA Web IDE' button plugin in Arduino IDE")
+    p_plg.set_defaults(func=cmd_install_plugin)
 
     p_push = sub.add_parser("push", help="ONE-COMMAND compile + wireless OTA flash (supports any .ino or sketch folder)")
     p_push.add_argument("sketch", nargs="?", default=str(SKETCH_DIR), help="Sketch folder or .ino file")

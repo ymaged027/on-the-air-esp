@@ -297,11 +297,17 @@ class OtaFlashTests(unittest.TestCase):
         self.assertEqual(ota_studio.ensure_ota_included(already), already)
 
         with tempfile.TemporaryDirectory() as td:
-            vbs = ota_studio.install_background_compiler_startup(startup_dir=Path(td), start_now=False)
-            self.assertTrue(vbs.is_file())
-            self.assertIn("ota_studio.py", vbs.read_text(encoding="utf-8"))
-            self.assertTrue(ota_studio.uninstall_background_compiler_startup(startup_dir=Path(td)))
-            self.assertFalse(vbs.is_file())
+            vsix = ota_flash.install_ide_plugin(plugins_dir=Path(td))
+            self.assertTrue(vsix.is_file())
+            import zipfile
+            with zipfile.ZipFile(vsix) as zf:
+                names = set(zf.namelist())
+                self.assertIn("[Content_Types].xml", names)
+                self.assertIn("extension.vsixmanifest", names)
+                self.assertIn("extension/package.json", names)
+                self.assertIn("extension/extension.js", names)
+                pkg = json.loads(zf.read("extension/package.json").decode("utf-8"))
+                self.assertIn("web-ide.bat", pkg["contributes"]["configuration"]["properties"]["mtrOta.webIdeBatPath"]["default"])
 
 
 if __name__ == "__main__":
