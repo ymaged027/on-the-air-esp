@@ -176,7 +176,16 @@ void OtaMonitorClass::clearBuffer() {
 String OtaMonitorClass::readLogChunk(uint32_t sinceOffset, uint32_t& nextOffset) const {
   lock();
   nextOffset = totalBytes_;
-  if (totalBytes_ == 0 || sinceOffset >= totalBytes_) {
+  if (totalBytes_ == 0) {
+    unlock();
+    return "";
+  }
+  // If client cursor is ahead of totalBytes_, the ESP32 rebooted (or buffer was cleared)
+  // -> replay everything from 0 so boot logs & setup() prints are never skipped!
+  if (sinceOffset > totalBytes_) {
+    sinceOffset = 0;
+  }
+  if (sinceOffset >= totalBytes_) {
     unlock();
     return "";
   }

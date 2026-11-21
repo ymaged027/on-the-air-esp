@@ -188,7 +188,10 @@ class PluggableOtaMonitor:
                         next_cur = int(payload.get("next", cursor))
                         chunk = payload.get("data", "")
                         if next_cur < cursor:
-                            cursor = 0
+                            self._send_status_line("\n--- Device rebooted ---")
+                            if not chunk:
+                                cursor = 0
+                                continue
                         if chunk:
                             self._send_to_ide(chunk.replace("\n", "\r\n").encode("utf-8", errors="replace"))
                         cursor = next_cur
@@ -471,10 +474,18 @@ def run_cli_monitor(host: str, port: int) -> int:
             try:
                 c, p = _http_get_json(f"http://{host}/api/logs?since={cursor}", timeout=2.0)
                 if c == 200 and p.get("ok"):
-                    if p.get("data"):
-                        sys.stdout.write(p["data"])
+                    nxt = int(p.get("next", cursor))
+                    chunk = p.get("data", "")
+                    if nxt < cursor:
+                        sys.stdout.write("\n--- Device rebooted ---\n")
                         sys.stdout.flush()
-                    cursor = int(p.get("next", cursor))
+                        if not chunk:
+                            cursor = 0
+                            continue
+                    if chunk:
+                        sys.stdout.write(chunk)
+                        sys.stdout.flush()
+                    cursor = nxt
             except Exception:
                 pass
 

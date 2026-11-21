@@ -329,7 +329,11 @@ async function pollLogs() {
     const d = await r.json();
     if (!d.ok) return;
     if (monFirst) { $("monOut").textContent = ""; monFirst = false; }
-    if (d.next < monCursor) { $("monOut").textContent = ""; monCursor = 0; }
+    if (d.next < monCursor) {
+      const el = $("monOut");
+      if (el.textContent.length) el.textContent += "\n--- Device rebooted ---\n";
+      if (!d.data) { monCursor = 0; return; }
+    }
     if (d.data) {
       const el = $("monOut");
       el.textContent += d.data;
