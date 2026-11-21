@@ -143,14 +143,18 @@ class PluggableOtaMonitor:
             self._close_sockets(notify_closed=False)
 
             try:
-                esp_sock = socket.create_connection((esp_host, esp_port), timeout=5)
+                esp_sock = socket.create_connection((esp_host, esp_port), timeout=2.0)
                 esp_sock.settimeout(None)
                 esp_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             except OSError as e:
                 _emit(
                     {
                         "eventType": "open",
-                        "message": f"Cannot connect to OTA Monitor at {esp_host}:{esp_port} ({e})",
+                        "message": (
+                            f"Cannot reach OTA Monitor at {esp_host}:{esp_port} ({e}). "
+                            "Make sure ESP32 has the latest OnTheAirESP firmware in Maintenance Mode "
+                            "and PC Wi-Fi is connected to MTR-OTA."
+                        ),
                         "error": True,
                     },
                     self.out_lock,
