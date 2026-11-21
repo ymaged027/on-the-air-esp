@@ -1,3 +1,3 @@
 @echo off
-title On The Air ESP - Open Pit Console
+title MTR-OTA - Open Web Console
 start "" "http://192.168.4.1"

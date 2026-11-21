@@ -20,7 +20,7 @@ extern "C" bool verifyRollbackLater() {
   return true;
 }
 
-// Compiled into .rodata of the .bin so sumo_flash.py & Web UI can verify target ID.
+// Compiled into .rodata of the .bin so ota_flash.py & Web UI can verify target ID.
 const char EMBEDDED_FW_META[] = FW_META_STRING;
 
 namespace {
@@ -29,8 +29,8 @@ DNSServer g_dnsServer;
 OtaManager* g_instance = nullptr;
 }  // namespace
 
-void OtaManager::begin(SumoParams* params,
-                       SumoParamsStore* store,
+void OtaManager::begin(AppParams* params,
+                       AppParamsStore* store,
                        DisarmCallback disarmFn,
                        IsArmedCallback isArmedFn) {
   params_    = params;
@@ -60,7 +60,7 @@ bool OtaManager::shouldEnterMaintenanceMode() {
   if (digitalRead(PIN_OTA_SWITCH) == LOW) {
     delay(25);
     if (digitalRead(PIN_OTA_SWITCH) == LOW) {
-      Serial.println(F("[OTA] Pit switch ACTIVE -> Maintenance Mode"));
+      Serial.println(F("[OTA] OTA switch ACTIVE -> Maintenance Mode"));
       return true;
     }
   }
@@ -93,14 +93,14 @@ bool OtaManager::shouldEnterMaintenanceMode() {
   return false;
 }
 
-void OtaManager::disableRadiosForMatch() {
+void OtaManager::disableRadiosForRunMode() {
   maintenanceActive_ = false;
   dnsActive_         = false;
   WiFi.disconnect(true, true);
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
   btStop();
-  Serial.println(F("[OTA] Match Mode: Wi-Fi & Bluetooth completely OFF."));
+  Serial.println(F("[OTA] Normal Run Mode: Wi-Fi & Bluetooth completely OFF."));
 }
 
 void OtaManager::startMaintenanceMode() {
@@ -111,7 +111,7 @@ void OtaManager::startMaintenanceMode() {
   bool connectedSta = false;
 
 #if OTA_USE_STA_FIRST
-  Serial.printf("[OTA] Connecting to Pit Wi-Fi '%s'...\n", OTA_STA_SSID);
+  Serial.printf("[OTA] Connecting to Wi-Fi '%s'...\n", OTA_STA_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.begin(OTA_STA_SSID, OTA_STA_PASS);
   uint32_t t0 = millis();
@@ -124,7 +124,7 @@ void OtaManager::startMaintenanceMode() {
     Serial.print(F("[OTA] Connected STA IP: "));
     Serial.println(WiFi.localIP());
   } else {
-    Serial.println(F("[OTA] Pit Wi-Fi unavailable, falling back to SoftAP."));
+    Serial.println(F("[OTA] External Wi-Fi unavailable, falling back to SoftAP."));
   }
 #endif
 
@@ -132,7 +132,7 @@ void OtaManager::startMaintenanceMode() {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(OTA_AP_SSID, OTA_AP_PASS, OTA_AP_CHANNEL);
     IPAddress apIp = WiFi.softAPIP();
-    // Captive Portal: any domain resolves to 192.168.4.1 so phone/laptop opens Pit Console automatically!
+    // Captive Portal: any domain resolves to 192.168.4.1 so phone/laptop opens Console automatically
     g_dnsServer.start(53, "*", apIp);
     dnsActive_ = true;
     Serial.printf("[OTA] SoftAP ready: SSID='%s' IP=%s (Captive Portal ON)\n",
@@ -143,7 +143,7 @@ void OtaManager::startMaintenanceMode() {
   g_server.begin();
   startArduinoOta();
   maintenanceActive_ = true;
-  Serial.println(F("[OTA] Pit Console (HTTP :80) & Arduino IDE Network Port ready."));
+  Serial.println(F("[OTA] Web Console (HTTP :80) & Arduino IDE Network Port ready."));
 }
 
 void OtaManager::startArduinoOta() {
@@ -154,7 +154,7 @@ void OtaManager::startArduinoOta() {
 
   ArduinoOTA.onStart([this]() {
     if (isArmedFn_ && isArmedFn_()) {
-      Serial.println(F("[ArduinoOTA] Blocked: robot is ARMED!"));
+      Serial.println(F("[ArduinoOTA] Blocked: device outputs are ARMED!"));
       ESP.restart();
     }
     if (disarmFn_) disarmFn_();
@@ -180,7 +180,7 @@ void OtaManager::startArduinoOta() {
 }
 
 void OtaManager::registerRoutes() {
-  const char* headerKeys[] = {"X-OTA-Token", "X-Target-Robot", "X-Firmware-MD5"};
+  const char* headerKeys[] = {"X-OTA-Token", "X-Target-Device", "X-Firmware-MD5"};
   g_server.collectHeaders(headerKeys, 3);
 
   g_server.on("/", HTTP_GET, []() { g_instance->handleRoot(); });
@@ -196,7 +196,7 @@ void OtaManager::registerRoutes() {
   g_server.on("/api/rollback", HTTP_POST, []() { g_instance->handleRollback(); });
   g_server.on("/api/reboot", HTTP_POST, []() { g_instance->handleReboot(); });
 
-  // Captive portal catch-all: redirect unknown non-API URLs to Pit Console
+  // Captive portal catch-all: redirect unknown non-API URLs to the Web Console
   g_server.onNotFound([]() {
     if (g_server.uri().startsWith("/api/")) {
       g_server.send(404, "application/json", "{\"ok\":false,\"error\":\"Not found\"}");
@@ -216,7 +216,7 @@ void OtaManager::handleClient() {
   g_server.handleClient();
   ArduinoOTA.handle();
 
-  // Slow heartbeat blink so team immediately knows Maintenance Mode is active
+  // Slow heartbeat blink indicates Maintenance Mode is active
   static uint32_t lastBlink = 0;
   if (millis() - lastBlink >= 600) {
     lastBlink = millis();
@@ -308,8 +308,8 @@ void OtaManager::handleStatus() {
   json.reserve(416);
   json += '{';
   json += "\"ok\":true,";
-  json += "\"robotId\":\"" ROBOT_ID "\",";
-  json += "\"board\":\"" ROBOT_BOARD "\",";
+  json += "\"deviceId\":\"" DEVICE_ID "\",";
+  json += "\"board\":\"" DEVICE_BOARD "\",";
   json += "\"version\":\"" FW_VERSION "\",";
   json += "\"chipId\":\"" + String((uint32_t)(mac >> 32), HEX) + String((uint32_t)mac, HEX) + "\",";
   json += "\"partition\":\"" + String(partLabel) + "\",";
@@ -329,7 +329,7 @@ void OtaManager::handleGetParams() {
     g_server.send(500, "application/json", "{\"ok\":false,\"error\":\"Params uninitialized\"}");
     return;
   }
-  g_server.send(200, "application/json", SumoParamsStore::toJson(*params_));
+  g_server.send(200, "application/json", AppParamsStore::toJson(*params_));
 }
 
 void OtaManager::handlePostParams() {
@@ -339,22 +339,22 @@ void OtaManager::handlePostParams() {
     return;
   }
 
-  SumoParams next = *params_;
-  if (g_server.hasArg("searchSpeed"))    next.searchSpeed    = (uint8_t)constrain(g_server.arg("searchSpeed").toInt(), 0, 255);
-  if (g_server.hasArg("attackSpeed"))    next.attackSpeed    = (uint8_t)constrain(g_server.arg("attackSpeed").toInt(), 0, 255);
-  if (g_server.hasArg("turnSpeed"))      next.turnSpeed      = (uint8_t)constrain(g_server.arg("turnSpeed").toInt(), 0, 255);
-  if (g_server.hasArg("lineThreshold"))  next.lineThreshold  = (uint16_t)constrain(g_server.arg("lineThreshold").toInt(), 0, 4095);
-  if (g_server.hasArg("opponentDistCm")) next.opponentDistCm = (uint16_t)constrain(g_server.arg("opponentDistCm").toInt(), 5, 150);
-  if (g_server.hasArg("startDelayMs"))   next.startDelayMs   = (uint16_t)constrain(g_server.arg("startDelayMs").toInt(), 0, 10000);
-  if (g_server.hasArg("strategy"))       next.strategy       = (uint8_t)constrain(g_server.arg("strategy").toInt(), 0, 3);
+  AppParams next = *params_;
+  if (g_server.hasArg("speedNormal"))     next.speedNormal     = (uint8_t)constrain(g_server.arg("speedNormal").toInt(), 0, 255);
+  if (g_server.hasArg("speedMax"))        next.speedMax        = (uint8_t)constrain(g_server.arg("speedMax").toInt(), 0, 255);
+  if (g_server.hasArg("turnSpeed"))       next.turnSpeed       = (uint8_t)constrain(g_server.arg("turnSpeed").toInt(), 0, 255);
+  if (g_server.hasArg("sensorThreshold")) next.sensorThreshold = (uint16_t)constrain(g_server.arg("sensorThreshold").toInt(), 0, 4095);
+  if (g_server.hasArg("rangeThreshold"))  next.rangeThreshold  = (uint16_t)constrain(g_server.arg("rangeThreshold").toInt(), 5, 150);
+  if (g_server.hasArg("startDelayMs"))    next.startDelayMs    = (uint16_t)constrain(g_server.arg("startDelayMs").toInt(), 0, 10000);
+  if (g_server.hasArg("mode"))            next.mode            = (uint8_t)constrain(g_server.arg("mode").toInt(), 0, 3);
 
-  SumoParams saved;
+  AppParams saved;
   if (!store_->save(next, saved)) {
     g_server.send(500, "application/json", "{\"ok\":false,\"error\":\"NVS write failed\"}");
     return;
   }
   *params_ = saved;
-  String resp = "{\"ok\":true,\"params\":" + SumoParamsStore::toJson(*params_) + "}";
+  String resp = "{\"ok\":true,\"params\":" + AppParamsStore::toJson(*params_) + "}";
   g_server.send(200, "application/json", resp);
 }
 
@@ -364,13 +364,13 @@ void OtaManager::handleResetParams() {
     g_server.send(500, "application/json", "{\"ok\":false,\"error\":\"Params uninitialized\"}");
     return;
   }
-  SumoParams saved;
+  AppParams saved;
   if (!store_->resetDefaults(saved)) {
     g_server.send(500, "application/json", "{\"ok\":false,\"error\":\"NVS reset failed\"}");
     return;
   }
   *params_ = saved;
-  String resp = "{\"ok\":true,\"params\":" + SumoParamsStore::toJson(*params_) + "}";
+  String resp = "{\"ok\":true,\"params\":" + AppParamsStore::toJson(*params_) + "}";
   g_server.send(200, "application/json", resp);
 }
 
@@ -388,16 +388,16 @@ void OtaManager::handleOtaUpload() {
       return;
     }
 
-    String targetRobot = g_server.header("X-Target-Robot");
-    if (targetRobot.length() > 0 && targetRobot != ROBOT_ID) {
-      otaError_ = "Target mismatch (expected " ROBOT_ID ", got " + targetRobot + ")";
+    String targetDevice = g_server.header("X-Target-Device");
+    if (targetDevice.length() > 0 && targetDevice != DEVICE_ID) {
+      otaError_ = "Target mismatch (expected " DEVICE_ID ", got " + targetDevice + ")";
       Serial.println("[OTA] Rejected: " + otaError_);
       return;
     }
 
     if (isArmedFn_ && isArmedFn_()) {
-      otaError_ = "Motors are ARMED — disarm robot before flashing";
-      Serial.println(F("[OTA] Rejected: motors armed"));
+      otaError_ = "Outputs are ARMED — disarm device before flashing";
+      Serial.println(F("[OTA] Rejected: outputs armed"));
       return;
     }
 

@@ -1,4 +1,4 @@
-"""Unit tests for tools/sumo_flash.py using a local mock Sumobot HTTP server."""
+"""Unit tests for tools/ota_flash.py using a local mock ESP32 OTA HTTP server."""
 
 from __future__ import annotations
 
@@ -11,22 +11,22 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import sumo_flash  # noqa: E402
+import ota_flash  # noqa: E402
 
 
-class MockSumobotState:
+class MockDeviceState:
     def __init__(self) -> None:
-        self.robot_id = "SUMO-01"
+        self.device_id = "MTR-OTA"
         self.version = "1.0.0"
         self.partition = "app0"
         self.armed = False
-        self.token = "secret-pin"
-        self.params = {"attackSpeed": 255, "strategy": 0}
+        self.token = "mtr-ota007"
+        self.params = {"speedMax": 255, "mode": 0}
         self.last_md5 = ""
         self.uploaded_bytes = b""
 
 
-def make_handler(state: MockSumobotState):
+def make_handler(state: MockDeviceState):
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, format, *args):  # noqa: A002
             return
@@ -45,7 +45,7 @@ def make_handler(state: MockSumobotState):
                     200,
                     {
                         "ok": True,
-                        "robotId": state.robot_id,
+                        "deviceId": state.device_id,
                         "board": "NODEMCU-32S",
                         "version": state.version,
                         "partition": state.partition,
@@ -69,8 +69,8 @@ def make_handler(state: MockSumobotState):
                 return
 
             if self.path == "/api/ota":
-                target = self.headers.get("X-Target-Robot", "")
-                if target and target != state.robot_id:
+                target = self.headers.get("X-Target-Device", "")
+                if target and target != state.device_id:
                     self._send_json(400, {"ok": False, "error": "Target mismatch"})
                     return
                 state.last_md5 = self.headers.get("X-Firmware-MD5", "")
@@ -79,7 +79,7 @@ def make_handler(state: MockSumobotState):
                 state.version = "1.1.0"
                 self._send_json(200, {"ok": True, "message": "Flashed OK"})
             elif self.path == "/api/params":
-                state.params["attackSpeed"] = 240
+                state.params["speedMax"] = 240
                 self._send_json(200, {"ok": True, "params": state.params})
             elif self.path == "/api/rollback":
                 self._send_json(200, {"ok": True, "message": "Rolling back"})
@@ -89,9 +89,9 @@ def make_handler(state: MockSumobotState):
     return Handler
 
 
-class SumoFlashTests(unittest.TestCase):
+class OtaFlashTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.state = MockSumobotState()
+        self.state = MockDeviceState()
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.state))
         self.port = self.server.server_address[1]
         self.host = f"127.0.0.1:{self.port}"
@@ -102,10 +102,9 @@ class SumoFlashTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
 
-    def _write_fake_bin(self, tmpdir: str, robot_id: str = "SUMO-01", version: str = "1.1.0") -> Path:
+    def _write_fake_bin(self, tmpdir: str, device_id: str = "MTR-OTA", version: str = "1.1.0") -> Path:
         p = Path(tmpdir) / "on-the-air-esp.ino.bin"
-        meta = f"SUMO_META:ID={robot_id};BOARD=NODEMCU-32S;VER={version};".encode("utf-8")
-        # Valid ESP32 magic byte 0xE9 + padding >= 4096 bytes
+        meta = f"OTA_META:ID={device_id};BOARD=NODEMCU-32S;VER={version};".encode("utf-8")
         content = b"\xe9" + (b"\x00" * 4096) + meta + (b"\xff" * 256)
         p.write_bytes(content)
         return p
@@ -113,8 +112,8 @@ class SumoFlashTests(unittest.TestCase):
     def test_inspect_valid_binary(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             bin_path = self._write_fake_bin(td)
-            info = sumo_flash.inspect_binary(bin_path)
-            self.assertEqual(info["meta"]["robotId"], "SUMO-01")
+            info = ota_flash.inspect_binary(bin_path)
+            self.assertEqual(info["meta"]["deviceId"], "MTR-OTA")
             self.assertEqual(info["meta"]["board"], "NODEMCU-32S")
             self.assertEqual(info["meta"]["version"], "1.1.0")
             self.assertEqual(len(info["md5"]), 32)
@@ -124,14 +123,14 @@ class SumoFlashTests(unittest.TestCase):
             p = Path(td) / "bad.bin"
             p.write_bytes(b"\x00" * 5000)
             with self.assertRaises(ValueError):
-                sumo_flash.inspect_binary(p)
+                ota_flash.inspect_binary(p)
 
     def test_flash_success_and_md5_header(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            bin_path = self._write_fake_bin(td, robot_id="SUMO-01", version="1.1.0")
-            expected_md5 = sumo_flash.inspect_binary(bin_path)["md5"]
-            rc = sumo_flash.main(
-                ["flash", str(bin_path), "--host", self.host, "--token", "secret-pin", "--no-wait", "--quiet"]
+            bin_path = self._write_fake_bin(td, device_id="MTR-OTA", version="1.1.0")
+            expected_md5 = ota_flash.inspect_binary(bin_path)["md5"]
+            rc = ota_flash.main(
+                ["flash", str(bin_path), "--host", self.host, "--token", "mtr-ota007", "--no-wait", "--quiet"]
             )
             self.assertEqual(rc, 0)
             self.assertEqual(self.state.last_md5, expected_md5)
@@ -139,9 +138,9 @@ class SumoFlashTests(unittest.TestCase):
 
     def test_flash_blocks_target_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            bin_path = self._write_fake_bin(td, robot_id="SUMO-99", version="1.1.0")
-            rc = sumo_flash.main(
-                ["flash", str(bin_path), "--host", self.host, "--token", "secret-pin", "--no-wait", "--quiet"]
+            bin_path = self._write_fake_bin(td, device_id="OTHER-BOT", version="1.1.0")
+            rc = ota_flash.main(
+                ["flash", str(bin_path), "--host", self.host, "--token", "mtr-ota007", "--no-wait", "--quiet"]
             )
             self.assertEqual(rc, 4)
 
@@ -149,25 +148,25 @@ class SumoFlashTests(unittest.TestCase):
         self.state.armed = True
         with tempfile.TemporaryDirectory() as td:
             bin_path = self._write_fake_bin(td)
-            rc = sumo_flash.main(
-                ["flash", str(bin_path), "--host", self.host, "--token", "secret-pin", "--no-wait", "--quiet"]
+            rc = ota_flash.main(
+                ["flash", str(bin_path), "--host", self.host, "--token", "mtr-ota007", "--no-wait", "--quiet"]
             )
             self.assertEqual(rc, 3)
 
     def test_params_and_rollback(self) -> None:
-        rc1 = sumo_flash.main(
-            ["params", "--host", self.host, "--token", "secret-pin", "--set", "attackSpeed=240"]
+        rc1 = ota_flash.main(
+            ["params", "--host", self.host, "--token", "mtr-ota007", "--set", "speedMax=240"]
         )
         self.assertEqual(rc1, 0)
-        rc2 = sumo_flash.main(["rollback", "--host", self.host, "--token", "secret-pin"])
+        rc2 = ota_flash.main(["rollback", "--host", self.host, "--token", "mtr-ota007"])
         self.assertEqual(rc2, 0)
 
     def test_read_token_from_config(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             cfg = Path(td) / "config.h"
-            cfg.write_text('#define OTA_AUTH_TOKEN "my-pit-pin"\n', encoding="utf-8")
-            self.assertEqual(sumo_flash.read_token_from_config(cfg), "my-pit-pin")
-        self.assertEqual(sumo_flash.read_token_from_config(), "sumo-pit-2026")
+            cfg.write_text('#define OTA_AUTH_TOKEN "custom-pin"\n', encoding="utf-8")
+            self.assertEqual(ota_flash.read_token_from_config(cfg), "custom-pin")
+        self.assertEqual(ota_flash.read_token_from_config(), "mtr-ota007")
 
 
 if __name__ == "__main__":

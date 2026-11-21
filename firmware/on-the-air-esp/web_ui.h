@@ -2,13 +2,13 @@
 
 #include <Arduino.h>
 
-// Single-page Pit Console stored in PROGMEM (auto-opens via Captive Portal!).
+// Single-page OTA Web Console stored in PROGMEM (auto-opens via Captive Portal).
 static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>On The Air ESP — Pit Console</title>
+<title>MTR-OTA — On The Air ESP</title>
 <style>
   :root{--bg:#0d1117;--card:#161b22;--bd:#30363d;--tx:#e6edf3;--mut:#8b949e;--acc:#58a6ff;--ok:#3fb950;--warn:#d29922;--err:#f85149}
   *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
@@ -48,14 +48,14 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <body>
 <div class="wrap">
   <h1>
-    <span id="titleId">On The Air ESP</span>
+    <span id="titleId">MTR-OTA</span>
     <span class="badge b-ok" id="badgeArmed">DISARMED</span>
     <span class="badge b-warn" id="badgeOta">CHECKING...</span>
   </h1>
-  <p class="sub">ESP32 NodeMCU-32S Wireless Pit Console &bull; Wi-Fi turns 100% OFF in Match Mode</p>
+  <p class="sub">ESP32 NodeMCU-32S Wireless OTA Console &bull; Wi-Fi turns 100% OFF in Normal Run Mode</p>
 
   <div class="card">
-    <h2>Robot Telemetry</h2>
+    <h2>Device Telemetry</h2>
     <div class="grid">
       <div class="kv"><div class="k">Firmware</div><div class="v" id="stVer">-</div></div>
       <div class="kv"><div class="k">Active Slot</div><div class="v" id="stPart">-</div></div>
@@ -67,9 +67,9 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   </div>
 
   <div class="card" id="tokenCard">
-    <h2>Security Token</h2>
-    <label for="token">Saved automatically in this browser (from <code>OTA_AUTH_TOKEN</code> in config.h)</label>
-    <input id="token" type="password" placeholder="Enter OTA_AUTH_TOKEN">
+    <h2>OTA Password</h2>
+    <label for="token">Saved automatically in this browser (default: <code>mtr-ota007</code>)</label>
+    <input id="token" type="password" placeholder="Enter OTA password">
   </div>
 
   <div class="card">
@@ -88,25 +88,25 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   </div>
 
   <div class="card">
-    <h2>Live Parameter Tuning (Instant &mdash; No Recompile!)</h2>
+    <h2>Live Parameter Tuning (NVS Flash &mdash; No Recompile!)</h2>
     <div class="row">
-      <div><label>Search Speed (0-255)</label><input id="pSearch" type="number" min="0" max="255"></div>
-      <div><label>Attack Speed (0-255)</label><input id="pAttack" type="number" min="0" max="255"></div>
+      <div><label>Normal Speed (0-255)</label><input id="pNorm" type="number" min="0" max="255"></div>
+      <div><label>Max Speed (0-255)</label><input id="pMax" type="number" min="0" max="255"></div>
       <div><label>Turn Speed (0-255)</label><input id="pTurn" type="number" min="0" max="255"></div>
     </div>
     <div class="row">
-      <div><label>Line Threshold (0-4095)</label><input id="pLine" type="number" min="0" max="4095"></div>
-      <div><label>Opponent Dist (5-150 cm)</label><input id="pDist" type="number" min="5" max="150"></div>
+      <div><label>Sensor Threshold (0-4095)</label><input id="pSens" type="number" min="0" max="4095"></div>
+      <div><label>Range Threshold (5-150 cm)</label><input id="pRng" type="number" min="5" max="150"></div>
       <div><label>Start Delay (0-10000 ms)</label><input id="pDelay" type="number" min="0" max="10000"></div>
     </div>
     <div class="row">
       <div>
-        <label>Match Strategy</label>
-        <select id="pStrat">
-          <option value="0">0 - Direct Attack</option>
-          <option value="1">1 - Circle Search</option>
-          <option value="2">2 - Wait &amp; Counter</option>
-          <option value="3">3 - Side Rush</option>
+        <label>Operating Mode</label>
+        <select id="pMode">
+          <option value="0">0 - Default</option>
+          <option value="1">1 - Profile 1</option>
+          <option value="2">2 - Profile 2</option>
+          <option value="3">3 - Profile 3</option>
         </select>
       </div>
     </div>
@@ -121,7 +121,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <h2>Recovery &amp; Control</h2>
     <div class="actions">
       <button class="btn btn-warn" id="btnRollback">Rollback to Previous Firmware</button>
-      <button class="btn btn-sec" id="btnReboot">Reboot Robot</button>
+      <button class="btn btn-sec" id="btnReboot">Reboot Device</button>
     </div>
     <div class="msg" id="ctlMsg"></div>
   </div>
@@ -129,7 +129,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
 <script>
 const $ = id => document.getElementById(id);
-let robotId = "";
+let deviceId = "";
 let selectedFile = null;
 
 function showMsg(el, cls, txt) {
@@ -139,7 +139,7 @@ function showMsg(el, cls, txt) {
 
 function getToken() {
   const t = $("token").value.trim();
-  localStorage.setItem("sumo_ota_token", t);
+  localStorage.setItem("ota_auth_token", t);
   return t;
 }
 
@@ -169,8 +169,8 @@ async function fetchStatus() {
   try {
     const r = await fetch("/api/status");
     const d = await r.json();
-    robotId = d.robotId || "";
-    $("titleId").textContent = d.robotId + " (" + d.board + ")";
+    deviceId = d.deviceId || "";
+    $("titleId").textContent = d.deviceId + " (" + d.board + ")";
     $("stVer").textContent = "v" + d.version;
     $("stPart").textContent = d.partition;
     $("stState").textContent = d.otaState;
@@ -194,13 +194,13 @@ async function fetchParams() {
   try {
     const r = await fetch("/api/params");
     const p = await r.json();
-    $("pSearch").value = p.searchSpeed;
-    $("pAttack").value = p.attackSpeed;
+    $("pNorm").value = p.speedNormal;
+    $("pMax").value = p.speedMax;
     $("pTurn").value = p.turnSpeed;
-    $("pLine").value = p.lineThreshold;
-    $("pDist").value = p.opponentDistCm;
+    $("pSens").value = p.sensorThreshold;
+    $("pRng").value = p.rangeThreshold;
     $("pDelay").value = p.startDelayMs;
-    $("pStrat").value = p.strategy;
+    $("pMode").value = p.mode;
   } catch (e) {}
 }
 
@@ -226,7 +226,6 @@ $("btnFlash").onclick = async () => {
     return showMsg($("otaMsg"), "err", "Wrong file! Pick on-the-air-esp.ino.bin (NOT bootloader or partitions).");
   }
 
-  // Quick magic-byte check right in browser (ESP32 app images start with 0xE9)
   const head = new Uint8Array(await file.slice(0, 1).arrayBuffer());
   if (head[0] !== 0xE9) {
     return showMsg($("otaMsg"), "err", "Not a valid ESP32 app image (missing 0xE9 header).");
@@ -244,7 +243,7 @@ $("btnFlash").onclick = async () => {
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/ota", true);
   xhr.setRequestHeader("X-OTA-Token", tok);
-  if (robotId) xhr.setRequestHeader("X-Target-Robot", robotId);
+  if (deviceId) xhr.setRequestHeader("X-Target-Device", deviceId);
 
   xhr.upload.onprogress = e => {
     if (e.lengthComputable) $("bar").style.width = Math.round((e.loaded / e.total) * 100) + "%";
@@ -255,7 +254,7 @@ $("btnFlash").onclick = async () => {
       const res = JSON.parse(xhr.responseText);
       if (xhr.status === 200 && res.ok) {
         $("bar").style.width = "100%";
-        showMsg($("otaMsg"), "ok", "Flash OK! Robot is rebooting into the new slot...");
+        showMsg($("otaMsg"), "ok", "Flash OK! Device is rebooting into the new slot...");
         setTimeout(waitReconnect, 2500);
       } else {
         showMsg($("otaMsg"), "err", "Flash rejected: " + (res.error || xhr.statusText));
@@ -273,13 +272,13 @@ $("btnFlash").onclick = async () => {
 
 $("btnSaveParams").onclick = async () => {
   const body = new URLSearchParams({
-    searchSpeed: $("pSearch").value,
-    attackSpeed: $("pAttack").value,
+    speedNormal: $("pNorm").value,
+    speedMax: $("pMax").value,
     turnSpeed: $("pTurn").value,
-    lineThreshold: $("pLine").value,
-    opponentDistCm: $("pDist").value,
+    sensorThreshold: $("pSens").value,
+    rangeThreshold: $("pRng").value,
     startDelayMs: $("pDelay").value,
-    strategy: $("pStrat").value
+    mode: $("pMode").value
   });
   const r = await fetch("/api/params", {
     method: "POST",
@@ -317,7 +316,7 @@ $("btnReboot").onclick = async () => {
   else showMsg($("ctlMsg"), "err", "Reboot failed: " + (d.error || r.status));
 };
 
-const savedTok = localStorage.getItem("sumo_ota_token");
+const savedTok = localStorage.getItem("ota_auth_token");
 if (savedTok) $("token").value = savedTok;
 fetchStatus();
 fetchParams();

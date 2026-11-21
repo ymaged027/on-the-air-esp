@@ -1,20 +1,20 @@
 #pragma once
 
 #include <Arduino.h>
-#include "sumo_params.h"
+#include "app_params.h"
 
 using DisarmCallback  = void (*)();
 using IsArmedCallback = bool (*)();
 
 class OtaManager {
 public:
-  void begin(SumoParams* params,
-             SumoParamsStore* store,
+  void begin(AppParams* params,
+             AppParamsStore* store,
              DisarmCallback disarmFn,
              IsArmedCallback isArmedFn);
 
   bool shouldEnterMaintenanceMode();
-  void disableRadiosForMatch();
+  void disableRadiosForRunMode();
   void startMaintenanceMode();
   void handleClient();
   void serviceRollbackConfirmation();
@@ -40,8 +40,8 @@ private:
   void handleRollback();
   void handleReboot();
 
-  SumoParams* params_        = nullptr;
-  SumoParamsStore* store_    = nullptr;
+  AppParams* params_         = nullptr;
+  AppParamsStore* store_     = nullptr;
   DisarmCallback disarmFn_   = nullptr;
   IsArmedCallback isArmedFn_ = nullptr;
 

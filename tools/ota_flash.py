@@ -2,20 +2,20 @@
 """
 On The Air ESP — Zero-Dependency CLI & One-Command Builder/Flasher
 ==================================================================
-Compile & flash your ESP32 NodeMCU-32S Sumobot over Wi-Fi in ONE command,
+Compile & flash your ESP32 NodeMCU-32S over Wi-Fi in ONE command,
 tune live NVS parameters, or roll back instantly.
 
 Uses Python 3 standard library only — no pip packages required (0 EGP).
 
 Easiest command (compiles sketch + flashes wirelessly automatically):
-  python tools/sumo_flash.py push
+  python tools/ota_flash.py push
 
 Other commands:
-  python tools/sumo_flash.py status
-  python tools/sumo_flash.py params --set attackSpeed=245 strategy=1
-  python tools/sumo_flash.py rollback
-  python tools/sumo_flash.py flash path/to/on-the-air-esp.ino.bin
-  python tools/sumo_flash.py inspect path/to/on-the-air-esp.ino.bin
+  python tools/ota_flash.py status
+  python tools/ota_flash.py params --set speedMax=245 mode=1
+  python tools/ota_flash.py rollback
+  python tools/ota_flash.py flash path/to/on-the-air-esp.ino.bin
+  python tools/ota_flash.py inspect path/to/on-the-air-esp.ino.bin
 """
 
 from __future__ import annotations
@@ -43,14 +43,14 @@ SKETCH_DIR = REPO_ROOT / "firmware" / "on-the-air-esp"
 CONFIG_HEADER = SKETCH_DIR / "config.h"
 DEFAULT_FQBN = "esp32:esp32:nodemcu-32s"
 
-META_RE = re.compile(rb"SUMO_META:ID=([^;]+);BOARD=([^;]+);VER=([^;]+);")
+META_RE = re.compile(rb"OTA_META:ID=([^;]+);BOARD=([^;]+);VER=([^;]+);")
 TOKEN_DEFINE_RE = re.compile(r'^\s*#define\s+OTA_AUTH_TOKEN\s+"([^"]*)"', re.MULTILINE)
 DEFAULT_HOST = "192.168.4.1"
 DEFAULT_TIMEOUT = 15
 
 
 def read_token_from_config(config_path: Path = CONFIG_HEADER) -> str:
-    """Auto-read OTA_AUTH_TOKEN from firmware/on-the-air-esp/config.h so users don't have to retype it."""
+    """Auto-read OTA_AUTH_TOKEN from firmware/on-the-air-esp/config.h."""
     if not config_path.is_file():
         return ""
     text = config_path.read_text(encoding="utf-8", errors="replace")
@@ -143,7 +143,7 @@ def inspect_binary(bin_path: Path) -> Dict[str, Any]:
     m = META_RE.search(data)
     if m:
         meta = {
-            "robotId": m.group(1).decode("utf-8", errors="replace"),
+            "deviceId": m.group(1).decode("utf-8", errors="replace"),
             "board": m.group(2).decode("utf-8", errors="replace"),
             "version": m.group(3).decode("utf-8", errors="replace"),
         }
@@ -186,11 +186,11 @@ def upload_firmware(
     host: str,
     bin_path: Path,
     token: str,
-    target_robot: str,
+    target_device: str,
     md5_hex: str,
     show_progress: bool = True,
 ) -> Tuple[int, Dict[str, Any]]:
-    boundary = f"----SumoOTA{uuid.uuid4().hex}"
+    boundary = f"----MtrOTA{uuid.uuid4().hex}"
     filename = bin_path.name
     data = bin_path.read_bytes()
 
@@ -212,8 +212,8 @@ def upload_firmware(
         conn.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
         conn.putheader("Content-Length", str(total_len))
         conn.putheader("X-OTA-Token", token)
-        if target_robot:
-            conn.putheader("X-Target-Robot", target_robot)
+        if target_device:
+            conn.putheader("X-Target-Device", target_device)
         conn.putheader("X-Firmware-MD5", md5_hex)
         conn.endheaders()
 
@@ -249,7 +249,7 @@ def upload_firmware(
 
 
 def wait_for_reboot(host: str, wait_sec: int = 20) -> Optional[Dict[str, Any]]:
-    print(f"Waiting up to {wait_sec}s for robot to reboot into new partition...")
+    print(f"Waiting up to {wait_sec}s for device to reboot into new partition...")
     time.sleep(2.0)
     deadline = time.time() + wait_sec
     while time.time() < deadline:
@@ -266,8 +266,8 @@ def wait_for_reboot(host: str, wait_sec: int = 20) -> Optional[Dict[str, Any]]:
 def resolve_token(cli_token: Optional[str]) -> str:
     if cli_token is not None:
         return cli_token
-    if "SUMO_OTA_TOKEN" in os.environ:
-        return os.environ["SUMO_OTA_TOKEN"]
+    if "OTA_AUTH_TOKEN" in os.environ:
+        return os.environ["OTA_AUTH_TOKEN"]
     return read_token_from_config()
 
 
@@ -285,33 +285,33 @@ def do_flash(
 
     if info["meta"]:
         print(
-            f"      Embedded tag: ID={info['meta']['robotId']}, "
+            f"      Embedded tag: ID={info['meta']['deviceId']}, "
             f"BOARD={info['meta']['board']}, VER=v{info['meta']['version']}"
         )
     elif not force:
-        print("Error: Binary has no SUMO_META tag. Pass --force to flash anyway.", file=sys.stderr)
+        print("Error: Binary has no OTA_META tag. Pass --force to flash anyway.", file=sys.stderr)
         return 2
 
-    print(f"[2/4] Checking live robot at http://{host} ...")
+    print(f"[2/4] Checking live device at http://{host} ...")
     code, st = http_json(host, "/api/status")
     if code != 200 or not st.get("ok"):
-        print(f"Error: Cannot reach robot (HTTP {code}): {st}", file=sys.stderr)
+        print(f"Error: Cannot reach device (HTTP {code}): {st}", file=sys.stderr)
         return 1
 
-    live_id = st.get("robotId", "")
+    live_id = st.get("deviceId", "")
     print(
         f"      Connected to {live_id} v{st.get('version')} "
         f"[slot={st.get('partition')}, state={st.get('otaState')}, armed={st.get('armed')}]"
     )
 
     if st.get("armed"):
-        print("Error: Robot reports ARMED. Disarm motors before flashing!", file=sys.stderr)
+        print("Error: Device reports ARMED. Disarm outputs before flashing!", file=sys.stderr)
         return 3
 
-    if info["meta"] and info["meta"]["robotId"] != live_id and not force:
+    if info["meta"] and info["meta"]["deviceId"] != live_id and not force:
         print(
-            f"Error: Target mismatch! Binary is for '{info['meta']['robotId']}' "
-            f"but connected robot is '{live_id}'. Use --force to override.",
+            f"Error: Target mismatch! Binary is for '{info['meta']['deviceId']}' "
+            f"but connected device is '{live_id}'. Use --force to override.",
             file=sys.stderr,
         )
         return 4
@@ -321,7 +321,7 @@ def do_flash(
         host=host,
         bin_path=bin_path,
         token=token,
-        target_robot="" if force else live_id,
+        target_device="" if force else live_id,
         md5_hex=info["md5"],
         show_progress=not quiet,
     )
@@ -338,13 +338,13 @@ def do_flash(
     after = wait_for_reboot(host, wait_sec=wait)
     if not after:
         print(
-            "Warning: Robot did not reconnect within timeout. "
-            "(Normal if it rebooted into Match Mode with Wi-Fi OFF!)"
+            "Warning: Device did not reconnect within timeout. "
+            "(Normal if it rebooted into Normal Run Mode with Wi-Fi OFF!)"
         )
         return 0
 
     print(
-        f"SUCCESS! Robot is back online: {after.get('robotId')} v{after.get('version')} "
+        f"SUCCESS! Device is back online: {after.get('deviceId')} v{after.get('version')} "
         f"[slot={after.get('partition')}, state={after.get('otaState')}]"
     )
     return 0
@@ -371,9 +371,9 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     print(f"SHA256 : {info['sha256']}")
     if info["meta"]:
         m = info["meta"]
-        print(f"Target : {m['robotId']} ({m['board']}) — v{m['version']}")
+        print(f"Target : {m['deviceId']} ({m['board']}) — v{m['version']}")
     else:
-        print("Target : <no SUMO_META tag found in binary>")
+        print("Target : <no OTA_META tag found in binary>")
     return 0
 
 
@@ -383,8 +383,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Error (HTTP {code}): {status}", file=sys.stderr)
         return 1
 
-    print("=== Sumobot Status ===")
-    for k in ("robotId", "board", "version", "partition", "otaState", "armed", "batteryV", "freeHeap", "uptimeSec"):
+    print("=== Device Status ===")
+    for k in ("deviceId", "board", "version", "partition", "otaState", "armed", "batteryV", "freeHeap", "uptimeSec"):
         if k in status:
             print(f"  {k:<12}: {status[k]}")
 
@@ -392,7 +392,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if pcode == 200:
         print("=== Live NVS Parameters ===")
         for k, v in params.items():
-            print(f"  {k:<15}: {v}")
+            print(f"  {k:<16}: {v}")
     return 0
 
 
@@ -460,7 +460,7 @@ def cmd_rollback(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="On The Air ESP — Sumobot OTA CLI Tool")
+    p = argparse.ArgumentParser(description="On The Air ESP — NodeMCU-32S OTA CLI Tool")
     sub = p.add_subparsers(dest="command", required=True)
 
     p_push = sub.add_parser("push", help="ONE-COMMAND compile + wireless OTA flash (auto-reads token from config.h)")
@@ -478,8 +478,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ins.add_argument("binary", help="Path to compiled .bin file")
     p_ins.set_defaults(func=cmd_inspect)
 
-    p_st = sub.add_parser("status", help="Query Sumobot status and live NVS parameters")
-    p_st.add_argument("--host", default=DEFAULT_HOST, help=f"Robot IP/host (default: {DEFAULT_HOST})")
+    p_st = sub.add_parser("status", help="Query device status and live NVS parameters")
+    p_st.add_argument("--host", default=DEFAULT_HOST, help=f"Device IP/host (default: {DEFAULT_HOST})")
     p_st.set_defaults(func=cmd_status)
 
     p_fl = sub.add_parser("flash", help="Safely flash an already-exported .bin over Wi-Fi")
@@ -492,14 +492,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_fl.add_argument("--quiet", action="store_true")
     p_fl.set_defaults(func=cmd_flash)
 
-    p_pa = sub.add_parser("params", help="Read or update live NVS Sumobot parameters")
+    p_pa = sub.add_parser("params", help="Read or update live NVS device parameters")
     p_pa.add_argument("--host", default=DEFAULT_HOST)
     p_pa.add_argument("--token", default=None, help="OTA token (auto-read from config.h if omitted)")
     p_pa.add_argument("--set", nargs="+", metavar="KEY=VAL", help="Parameters to update")
     p_pa.add_argument("--reset", action="store_true", help="Reset all parameters to defaults")
     p_pa.set_defaults(func=cmd_params)
 
-    p_rb = sub.add_parser("rollback", help="Roll back Sumobot to the previous OTA firmware slot")
+    p_rb = sub.add_parser("rollback", help="Roll back device to the previous OTA firmware slot")
     p_rb.add_argument("--host", default=DEFAULT_HOST)
     p_rb.add_argument("--token", default=None, help="OTA token (auto-read from config.h if omitted)")
     p_rb.set_defaults(func=cmd_rollback)
