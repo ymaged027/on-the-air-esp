@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "config.h"
 #include "app_params.h"
 
 using DisarmCallback  = void (*)();
@@ -8,6 +9,10 @@ using IsArmedCallback = bool (*)();
 
 class OtaManager {
 public:
+  // Optional runtime overrides (call before begin() / startMaintenanceMode()).
+  void setCredentials(const char* ssid, const char* password, const char* ideHostname = nullptr);
+  void setDeviceId(const char* deviceId, const char* version = FW_VERSION);
+
   void begin(AppParams* params,
              AppParamsStore* store,
              DisarmCallback disarmFn,
@@ -21,6 +26,8 @@ public:
 
   float readBatteryVoltage() const;
   const char* getOtaStateString() const;
+  const char* getDeviceId() const { return deviceId_; }
+  const char* getFirmwareVersion() const { return fwVersion_; }
   bool isMaintenanceActive() const { return maintenanceActive_; }
 
 private:
@@ -39,6 +46,13 @@ private:
   void handleOtaUpload();
   void handleRollback();
   void handleReboot();
+
+  const char* deviceId_      = DEVICE_ID;
+  const char* fwVersion_     = FW_VERSION;
+  const char* apSsid_        = OTA_AP_SSID;
+  const char* apPass_        = OTA_AP_PASS;
+  const char* mdnsHost_      = OTA_MDNS_HOST;
+  const char* authToken_     = OTA_AUTH_TOKEN;
 
   AppParams* params_         = nullptr;
   AppParamsStore* store_     = nullptr;

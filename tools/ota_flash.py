@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-On The Air ESP — Zero-Dependency CLI & One-Command Builder/Flasher
-==================================================================
-Compile & flash your ESP32 NodeMCU-32S over Wi-Fi in ONE command,
-tune live NVS parameters, or roll back instantly.
+On The Air ESP — Zero-Dependency Setup, Library Installer & OTA CLI
+===================================================================
+Uses Python 3 standard library only — zero pip packages required (0 EGP).
 
-Uses Python 3 standard library only — no pip packages required (0 EGP).
-
-Easiest command (compiles sketch + flashes wirelessly automatically):
-  python tools/ota_flash.py push
-
-Other commands:
-  python tools/ota_flash.py status
+Commands:
+  python tools/ota_flash.py setup                  # 1-step USB setup (library + ESP32 core + USB flash)
+  python tools/ota_flash.py install-lib            # Install OnTheAirESP into Arduino IDE Libraries
+  python tools/ota_flash.py push [sketch_or_ino]   # Compile + flash over MTR-OTA Wi-Fi
+  python tools/ota_flash.py status                 # Check device telemetry & live NVS params
   python tools/ota_flash.py params --set speedMax=245 mode=1
-  python tools/ota_flash.py rollback
-  python tools/ota_flash.py flash path/to/on-the-air-esp.ino.bin
-  python tools/ota_flash.py inspect path/to/on-the-air-esp.ino.bin
+  python tools/ota_flash.py rollback               # Instant wireless rollback
+  python tools/ota_flash.py flash file.ino.bin     # Flash an already-exported .bin
+  python tools/ota_flash.py inspect file.ino.bin   # Inspect embedded metadata & checksums
 """
 
 from __future__ import annotations
@@ -36,12 +33,13 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKETCH_DIR = REPO_ROOT / "firmware" / "on-the-air-esp"
-CONFIG_HEADER = SKETCH_DIR / "config.h"
+CONFIG_HEADER = REPO_ROOT / "src" / "config.h"
 DEFAULT_FQBN = "esp32:esp32:nodemcu-32s"
+ESP32_BOARD_URL = "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
 
 META_RE = re.compile(rb"OTA_META:ID=([^;]+);BOARD=([^;]+);VER=([^;]+);")
 TOKEN_DEFINE_RE = re.compile(r'^\s*#define\s+OTA_AUTH_TOKEN\s+"([^"]*)"', re.MULTILINE)
@@ -50,12 +48,49 @@ DEFAULT_TIMEOUT = 15
 
 
 def read_token_from_config(config_path: Path = CONFIG_HEADER) -> str:
-    """Auto-read OTA_AUTH_TOKEN from firmware/on-the-air-esp/config.h."""
+    """Auto-read OTA_AUTH_TOKEN from src/config.h."""
     if not config_path.is_file():
         return ""
     text = config_path.read_text(encoding="utf-8", errors="replace")
     m = TOKEN_DEFINE_RE.search(text)
     return m.group(1) if m else ""
+
+
+def resolve_sketch_dir(sketch_arg: str | Path) -> Path:
+    """Accept either a sketch directory OR a direct path to a .ino file (great for drag-and-drop!)."""
+    p = Path(sketch_arg).expanduser().resolve()
+    if p.is_file() and p.suffix.lower() == ".ino":
+        return p.parent
+    if p.is_dir():
+        return p
+    raise FileNotFoundError(f"Sketch path not found: {sketch_arg}")
+
+
+def default_arduino_libraries_dir() -> Path:
+    """Return the standard Arduino IDE user libraries folder for the current OS."""
+    home = Path.home()
+    if os.name == "nt":
+        docs = home / "Documents" / "Arduino" / "libraries"
+        if (home / "OneDrive" / "Documents" / "Arduino").is_dir() and not (home / "Documents" / "Arduino").is_dir():
+            docs = home / "OneDrive" / "Documents" / "Arduino" / "libraries"
+        return docs
+    return home / "Arduino" / "libraries"
+
+
+def install_arduino_library(target_libraries_dir: Optional[Path] = None, repo_root: Path = REPO_ROOT) -> Path:
+    """Install OnTheAirESP into Arduino IDE's libraries folder so #include <OnTheAirESP.h> works everywhere."""
+    libs_dir = target_libraries_dir or default_arduino_libraries_dir()
+    dest = libs_dir / "OnTheAirESP"
+    libs_dir.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(repo_root / "library.properties", dest / "library.properties")
+    shutil.copytree(repo_root / "src", dest / "src")
+    if (repo_root / "examples").is_dir():
+        shutil.copytree(repo_root / "examples", dest / "examples")
+    return dest
 
 
 def find_arduino_cli() -> Optional[str]:
@@ -90,23 +125,58 @@ def find_arduino_cli() -> Optional[str]:
     return None
 
 
+def ensure_esp32_core(cli: str) -> None:
+    """Ensure the esp32:esp32 board package is installed in Arduino IDE / arduino-cli."""
+    res = subprocess.run([cli, "core", "list", "--format", "json"], capture_output=True, text=True)
+    if res.returncode == 0 and "esp32:esp32" in res.stdout:
+        print("      ESP32 board package already installed.")
+        return
+
+    print("      ESP32 board package not found — installing esp32:esp32 (first time only)...")
+    subprocess.run(
+        [cli, "config", "add", "board_manager.additional_urls", ESP32_BOARD_URL],
+        check=False,
+    )
+    subprocess.run([cli, "core", "update-index"], check=True)
+    subprocess.run([cli, "core", "install", "esp32:esp32"], check=True)
+
+
+def list_serial_ports(cli: str) -> List[Dict[str, str]]:
+    """Query connected serial ports via arduino-cli."""
+    res = subprocess.run([cli, "board", "list", "--format", "json"], capture_output=True, text=True)
+    if res.returncode != 0 or not res.stdout.strip():
+        return []
+    data = json.loads(res.stdout)
+    raw_ports = data.get("detected_ports", data) if isinstance(data, dict) else data
+    ports: List[Dict[str, str]] = []
+    for entry in raw_ports or []:
+        port_info = entry.get("port", entry) if isinstance(entry, dict) else {}
+        if port_info.get("protocol") == "serial" and port_info.get("address"):
+            label = port_info.get("protocol_label") or port_info.get("label") or "Serial"
+            ports.append({"address": port_info["address"], "label": label})
+    return ports
+
+
 def compile_sketch(sketch_dir: Path = SKETCH_DIR, fqbn: str = DEFAULT_FQBN) -> Path:
     """Compile the Arduino sketch using Arduino IDE's bundled arduino-cli and return the .ino.bin path."""
     cli = find_arduino_cli()
     if not cli:
         raise FileNotFoundError(
-            "Could not find arduino-cli. Install Arduino IDE 2.x (or add arduino-cli to PATH), "
-            "or export the binary in Arduino IDE (Sketch -> Export Compiled Binary) and use 'flash'."
+            "Could not find arduino-cli. Install Arduino IDE 2.x (https://www.arduino.cc/en/software) "
+            "or add arduino-cli to PATH."
         )
 
-    build_dir = Path(tempfile.gettempdir()) / "on-the-air-esp-build"
+    sketch_dir = resolve_sketch_dir(sketch_dir)
+    build_dir = Path(tempfile.gettempdir()) / f"on-the-air-esp-build-{sketch_dir.name}"
     build_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[0/4] Compiling {sketch_dir.name} for {fqbn} ...")
+    print(f"[0/4] Compiling '{sketch_dir.name}' for {fqbn} ...")
     cmd = [
         cli,
         "compile",
         "--fqbn",
         fqbn,
+        "--library",
+        str(REPO_ROOT),
         "--build-path",
         str(build_dir),
         str(sketch_dir),
@@ -117,7 +187,11 @@ def compile_sketch(sketch_dir: Path = SKETCH_DIR, fqbn: str = DEFAULT_FQBN) -> P
 
     bin_path = build_dir / f"{sketch_dir.name}.ino.bin"
     if not bin_path.is_file():
-        raise FileNotFoundError(f"Expected compiled binary not found: {bin_path}")
+        bins = [b for b in build_dir.glob("*.ino.bin") if "merged" not in b.name]
+        if bins:
+            bin_path = bins[0]
+        else:
+            raise FileNotFoundError(f"Expected compiled binary not found in: {build_dir}")
     return bin_path
 
 
@@ -133,7 +207,7 @@ def inspect_binary(bin_path: Path) -> Dict[str, Any]:
     if data[0] != 0xE9:
         raise ValueError(
             f"Invalid ESP32 image magic byte: 0x{data[0]:02X} (expected 0xE9). "
-            "Pick on-the-air-esp.ino.bin (NOT .bootloader.bin or .partitions.bin)."
+            "Pick *.ino.bin (NOT .bootloader.bin or .partitions.bin)."
         )
 
     md5_hex = hashlib.md5(data).hexdigest()
@@ -350,8 +424,88 @@ def do_flash(
     return 0
 
 
+def cmd_install_lib(args: argparse.Namespace) -> int:
+    target = Path(args.dir) if args.dir else None
+    dest = install_arduino_library(target_libraries_dir=target)
+    print(f"Installed Arduino library 'OnTheAirESP' -> {dest}")
+    print("Restart Arduino IDE (if open) to use #include <OnTheAirESP.h> and File -> Examples -> OnTheAirESP.")
+    return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    print("[1/3] Installing OnTheAirESP into Arduino IDE libraries...")
+    dest = install_arduino_library()
+    print(f"      Installed -> {dest}")
+
+    print("[2/3] Checking Arduino CLI & ESP32 NodeMCU-32S board core...")
+    cli = find_arduino_cli()
+    if not cli:
+        print("Error: Arduino IDE 2.x / arduino-cli not found.", file=sys.stderr)
+        print("Install Arduino IDE 2.x from https://www.arduino.cc/en/software and re-run setup-usb.bat.")
+        return 2
+    ensure_esp32_core(cli)
+
+    if args.no_flash:
+        print("[3/3] Skipping USB flash (--no-flash). Setup complete!")
+        return 0
+
+    print("[3/3] Looking for plugged-in ESP32 NodeMCU-32S over USB...")
+    port = args.port
+    if not port:
+        ports = list_serial_ports(cli)
+        if not ports:
+            print("      No USB serial board detected right now.")
+            print("      Library & ESP32 core are ready! Plug in your NodeMCU-32S via USB and run setup-usb.bat again,")
+            print("      OR open File -> Examples -> OnTheAirESP -> BasicOTA in Arduino IDE.")
+            return 0
+        if len(ports) == 1:
+            port = ports[0]["address"]
+            print(f"      Auto-selected USB port: {port} ({ports[0]['label']})")
+        else:
+            print("      Multiple serial ports detected:")
+            for idx, p in enumerate(ports, start=1):
+                print(f"        {idx}. {p['address']} ({p['label']})")
+            choice = input("      Pick port number (or press Enter for 1): ").strip()
+            pick = int(choice) - 1 if choice.isdigit() and 1 <= int(choice) <= len(ports) else 0
+            port = ports[pick]["address"]
+
+    sketch_dir = resolve_sketch_dir(args.sketch)
+    print(f"      Compiling & uploading '{sketch_dir.name}' to {port} ({args.fqbn}) ...")
+    cmd = [
+        cli,
+        "compile",
+        "--upload",
+        "--port",
+        port,
+        "--fqbn",
+        args.fqbn,
+        "--library",
+        str(REPO_ROOT),
+        str(sketch_dir),
+    ]
+    res = subprocess.run(cmd)
+    if res.returncode != 0:
+        print(
+            "Error: USB upload failed. If NodeMCU-32S says 'Connecting...', hold the BOOT button for 1s during upload.",
+            file=sys.stderr,
+        )
+        return res.returncode
+
+    print()
+    print("============================================================")
+    print("  USB SETUP COMPLETE! You can unplug the USB cable now.")
+    print("============================================================")
+    print("  Next (wireless updates forever):")
+    print("  1. Press BOOT right after power-on while blue LED fast-blinks")
+    print("     (or close a jumper/switch between GPIO 33 and GND).")
+    print("  2. Connect Wi-Fi to:  MTR-OTA   (password: mtr-ota007)")
+    print("  3. Double-click flash.bat OR upload via Arduino IDE Port 'MTR-OTA'.")
+    return 0
+
+
 def cmd_push(args: argparse.Namespace) -> int:
-    bin_path = compile_sketch(sketch_dir=Path(args.sketch), fqbn=args.fqbn)
+    sketch_dir = resolve_sketch_dir(args.sketch)
+    bin_path = compile_sketch(sketch_dir=sketch_dir, fqbn=args.fqbn)
     return do_flash(
         bin_path=bin_path,
         host=args.host,
@@ -460,14 +614,25 @@ def cmd_rollback(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="On The Air ESP — NodeMCU-32S OTA CLI Tool")
+    p = argparse.ArgumentParser(description="On The Air ESP — NodeMCU-32S Setup & OTA CLI")
     sub = p.add_subparsers(dest="command", required=True)
 
-    p_push = sub.add_parser("push", help="ONE-COMMAND compile + wireless OTA flash (auto-reads token from config.h)")
-    p_push.add_argument("--sketch", default=str(SKETCH_DIR), help="Sketch folder path")
+    p_setup = sub.add_parser("setup", help="1-step first-time setup: install library + ESP32 core + USB flash")
+    p_setup.add_argument("sketch", nargs="?", default=str(SKETCH_DIR), help="Sketch folder or .ino file")
+    p_setup.add_argument("--port", default=None, help="USB COM port (auto-detected if omitted)")
+    p_setup.add_argument("--fqbn", default=DEFAULT_FQBN, help=f"Board FQBN (default: {DEFAULT_FQBN})")
+    p_setup.add_argument("--no-flash", action="store_true", help="Only install library & ESP32 core without USB flashing")
+    p_setup.set_defaults(func=cmd_setup)
+
+    p_lib = sub.add_parser("install-lib", help="Install OnTheAirESP into Arduino IDE Libraries")
+    p_lib.add_argument("--dir", default=None, help="Custom Arduino libraries directory")
+    p_lib.set_defaults(func=cmd_install_lib)
+
+    p_push = sub.add_parser("push", help="ONE-COMMAND compile + wireless OTA flash (supports any .ino or sketch folder)")
+    p_push.add_argument("sketch", nargs="?", default=str(SKETCH_DIR), help="Sketch folder or .ino file")
     p_push.add_argument("--fqbn", default=DEFAULT_FQBN, help=f"Board FQBN (default: {DEFAULT_FQBN})")
     p_push.add_argument("--host", default=DEFAULT_HOST)
-    p_push.add_argument("--token", default=None, help="OTA token (auto-read from config.h if omitted)")
+    p_push.add_argument("--token", default=None, help="OTA password (auto-read from src/config.h if omitted)")
     p_push.add_argument("--force", action="store_true")
     p_push.add_argument("--no-wait", action="store_true")
     p_push.add_argument("--wait", type=int, default=20)
@@ -485,7 +650,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_fl = sub.add_parser("flash", help="Safely flash an already-exported .bin over Wi-Fi")
     p_fl.add_argument("binary", help="Path to compiled .bin file")
     p_fl.add_argument("--host", default=DEFAULT_HOST)
-    p_fl.add_argument("--token", default=None, help="OTA token (auto-read from config.h if omitted)")
+    p_fl.add_argument("--token", default=None, help="OTA password (auto-read from src/config.h if omitted)")
     p_fl.add_argument("--force", action="store_true")
     p_fl.add_argument("--no-wait", action="store_true")
     p_fl.add_argument("--wait", type=int, default=20)
@@ -494,14 +659,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_pa = sub.add_parser("params", help="Read or update live NVS device parameters")
     p_pa.add_argument("--host", default=DEFAULT_HOST)
-    p_pa.add_argument("--token", default=None, help="OTA token (auto-read from config.h if omitted)")
+    p_pa.add_argument("--token", default=None, help="OTA password (auto-read from src/config.h if omitted)")
     p_pa.add_argument("--set", nargs="+", metavar="KEY=VAL", help="Parameters to update")
     p_pa.add_argument("--reset", action="store_true", help="Reset all parameters to defaults")
     p_pa.set_defaults(func=cmd_params)
 
     p_rb = sub.add_parser("rollback", help="Roll back device to the previous OTA firmware slot")
     p_rb.add_argument("--host", default=DEFAULT_HOST)
-    p_rb.add_argument("--token", default=None, help="OTA token (auto-read from config.h if omitted)")
+    p_rb.add_argument("--token", default=None, help="OTA password (auto-read from src/config.h if omitted)")
     p_rb.set_defaults(func=cmd_rollback)
 
     return p

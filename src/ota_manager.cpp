@@ -29,6 +29,24 @@ DNSServer g_dnsServer;
 OtaManager* g_instance = nullptr;
 }  // namespace
 
+void OtaManager::setCredentials(const char* ssid, const char* password, const char* ideHostname) {
+  if (ssid && ssid[0]) {
+    apSsid_   = ssid;
+    mdnsHost_ = (ideHostname && ideHostname[0]) ? ideHostname : ssid;
+  } else if (ideHostname && ideHostname[0]) {
+    mdnsHost_ = ideHostname;
+  }
+  if (password) {
+    apPass_    = password;
+    authToken_ = password;
+  }
+}
+
+void OtaManager::setDeviceId(const char* deviceId, const char* version) {
+  if (deviceId && deviceId[0]) deviceId_ = deviceId;
+  if (version && version[0])   fwVersion_ = version;
+}
+
 void OtaManager::begin(AppParams* params,
                        AppParamsStore* store,
                        DisarmCallback disarmFn,
@@ -130,13 +148,12 @@ void OtaManager::startMaintenanceMode() {
 
   if (!connectedSta) {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(OTA_AP_SSID, OTA_AP_PASS, OTA_AP_CHANNEL);
+    WiFi.softAP(apSsid_, apPass_, OTA_AP_CHANNEL);
     IPAddress apIp = WiFi.softAPIP();
-    // Captive Portal: any domain resolves to 192.168.4.1 so phone/laptop opens Console automatically
     g_dnsServer.start(53, "*", apIp);
     dnsActive_ = true;
     Serial.printf("[OTA] SoftAP ready: SSID='%s' IP=%s (Captive Portal ON)\n",
-                  OTA_AP_SSID, apIp.toString().c_str());
+                  apSsid_, apIp.toString().c_str());
   }
 
   registerRoutes();
@@ -147,9 +164,9 @@ void OtaManager::startMaintenanceMode() {
 }
 
 void OtaManager::startArduinoOta() {
-  ArduinoOTA.setHostname(OTA_MDNS_HOST);
+  ArduinoOTA.setHostname(mdnsHost_);
   if (isAuthRequired()) {
-    ArduinoOTA.setPassword(OTA_AUTH_TOKEN);
+    ArduinoOTA.setPassword(authToken_);
   }
 
   ArduinoOTA.onStart([this]() {
@@ -196,7 +213,6 @@ void OtaManager::registerRoutes() {
   g_server.on("/api/rollback", HTTP_POST, []() { g_instance->handleRollback(); });
   g_server.on("/api/reboot", HTTP_POST, []() { g_instance->handleReboot(); });
 
-  // Captive portal catch-all: redirect unknown non-API URLs to the Web Console
   g_server.onNotFound([]() {
     if (g_server.uri().startsWith("/api/")) {
       g_server.send(404, "application/json", "{\"ok\":false,\"error\":\"Not found\"}");
@@ -216,7 +232,6 @@ void OtaManager::handleClient() {
   g_server.handleClient();
   ArduinoOTA.handle();
 
-  // Slow heartbeat blink indicates Maintenance Mode is active
   static uint32_t lastBlink = 0;
   if (millis() - lastBlink >= 600) {
     lastBlink = millis();
@@ -277,12 +292,12 @@ const char* OtaManager::getOtaStateString() const {
 }
 
 bool OtaManager::isAuthRequired() const {
-  return strlen(OTA_AUTH_TOKEN) > 0;
+  return authToken_ && strlen(authToken_) > 0;
 }
 
 bool OtaManager::isTokenValid(const String& provided) const {
   if (!isAuthRequired()) return true;
-  return provided == OTA_AUTH_TOKEN;
+  return provided == authToken_;
 }
 
 bool OtaManager::checkAuthAndReply() {
@@ -308,9 +323,9 @@ void OtaManager::handleStatus() {
   json.reserve(416);
   json += '{';
   json += "\"ok\":true,";
-  json += "\"deviceId\":\"" DEVICE_ID "\",";
+  json += "\"deviceId\":\"" + String(deviceId_) + "\",";
   json += "\"board\":\"" DEVICE_BOARD "\",";
-  json += "\"version\":\"" FW_VERSION "\",";
+  json += "\"version\":\"" + String(fwVersion_) + "\",";
   json += "\"chipId\":\"" + String((uint32_t)(mac >> 32), HEX) + String((uint32_t)mac, HEX) + "\",";
   json += "\"partition\":\"" + String(partLabel) + "\",";
   json += "\"otaState\":\"" + String(getOtaStateString()) + "\",";
@@ -389,8 +404,8 @@ void OtaManager::handleOtaUpload() {
     }
 
     String targetDevice = g_server.header("X-Target-Device");
-    if (targetDevice.length() > 0 && targetDevice != DEVICE_ID) {
-      otaError_ = "Target mismatch (expected " DEVICE_ID ", got " + targetDevice + ")";
+    if (targetDevice.length() > 0 && targetDevice != deviceId_) {
+      otaError_ = "Target mismatch (expected " + String(deviceId_) + ", got " + targetDevice + ")";
       Serial.println("[OTA] Rejected: " + otaError_);
       return;
     }

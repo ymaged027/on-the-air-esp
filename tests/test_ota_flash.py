@@ -168,6 +168,15 @@ class OtaFlashTests(unittest.TestCase):
             self.assertEqual(ota_flash.read_token_from_config(cfg), "custom-pin")
         self.assertEqual(ota_flash.read_token_from_config(), "mtr-ota007")
 
+    def test_install_library_and_resolve_sketch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            installed = ota_flash.install_arduino_library(target_libraries_dir=Path(td))
+            self.assertTrue((installed / "library.properties").is_file())
+            self.assertTrue((installed / "src" / "OnTheAirESP.h").is_file())
+            self.assertTrue((installed / "examples" / "BasicOTA" / "BasicOTA.ino").is_file())
+            ino = installed / "examples" / "BasicOTA" / "BasicOTA.ino"
+            self.assertEqual(ota_flash.resolve_sketch_dir(ino), ino.parent)
+
 
 if __name__ == "__main__":
     unittest.main()
