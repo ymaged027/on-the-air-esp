@@ -33,6 +33,7 @@
 class OnTheAirEspFacade {
 public:
   void setCredentials(const char* ssid, const char* password, const char* ideHostname = nullptr);
+  void setExternalWiFi(const char* staSsid, const char* staPassword);
   void setDeviceId(const char* deviceId, const char* version = FW_VERSION);
   void setDisarmCallback(DisarmCallback fn);
   void setArmedCallback(IsArmedCallback fn);

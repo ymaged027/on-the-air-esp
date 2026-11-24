@@ -286,6 +286,8 @@ class OtaFlashTests(unittest.TestCase):
         html = ota_studio.extract_web_ui_html()
         self.assertIn("Code Window", html)
         self.assertIn("OTA Monitor", html)
+        self.assertIn("Live GPIO", html)
+        self.assertIn("Home / Lab Wi-Fi", html)
         self.assertIn('accept=".bin,.ino"', html)
 
         plain = "void setup() {\n  pinMode(2, OUTPUT);\n}\nvoid loop() {}\n"
@@ -296,9 +298,17 @@ class OtaFlashTests(unittest.TestCase):
         already = "#include <OnTheAirESP.h>\nvoid setup() { OnTheAirESP.begin(); }\nvoid loop() {}\n"
         self.assertEqual(ota_studio.ensure_ota_included(already), already)
 
+        state = ota_studio.StudioState(explicit_host="192.168.4.1", fqbn=ota_flash.DEFAULT_FQBN)
+        state.set_pending_sketch("void setup(){}", "my_bot.ino")
+        code, name = state.pop_pending_sketch()
+        self.assertEqual(code, "void setup(){}")
+        self.assertEqual(name, "my_bot.ino")
+        self.assertIsNone(state.pop_pending_sketch()[0])
+
         with tempfile.TemporaryDirectory() as td:
             vsix = ota_flash.install_ide_plugin(plugins_dir=Path(td))
             self.assertTrue(vsix.is_file())
+            self.assertEqual(vsix.name, "mtr-ota-web-ide-2.0.0.vsix")
             import zipfile
             with zipfile.ZipFile(vsix) as zf:
                 names = set(zf.namelist())
@@ -306,8 +316,9 @@ class OtaFlashTests(unittest.TestCase):
                 self.assertIn("extension.vsixmanifest", names)
                 self.assertIn("extension/package.json", names)
                 self.assertIn("extension/extension.js", names)
+                self.assertIn("extension/icon-flash-dark.svg", names)
                 pkg = json.loads(zf.read("extension/package.json").decode("utf-8"))
-                self.assertIn("web-ide.bat", pkg["contributes"]["configuration"]["properties"]["mtrOta.webIdeBatPath"]["default"])
+                self.assertTrue(Path(pkg["contributes"]["configuration"]["properties"]["mtrOta.repoPath"]["default"]).is_dir())
 
 
 if __name__ == "__main__":

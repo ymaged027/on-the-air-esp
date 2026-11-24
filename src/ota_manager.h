@@ -10,6 +10,7 @@ using IsArmedCallback = bool (*)();
 class OtaManager {
 public:
   void setCredentials(const char* ssid, const char* password, const char* ideHostname = nullptr);
+  void setExternalWiFi(const char* staSsid, const char* staPassword);
   void setDeviceId(const char* deviceId, const char* version = FW_VERSION);
 
   void begin(AppParams* params,
@@ -38,6 +39,8 @@ private:
   bool isAuthRequired() const;
   bool isTokenValid(const String& provided) const;
   bool checkAuthAndReply();
+  bool loadSavedStaCredentials(String& ssidOut, String& passOut) const;
+  bool saveStaCredentials(const String& ssid, const String& pass);
   void registerRoutes();
   void startArduinoOta();
 
@@ -46,6 +49,9 @@ private:
   void handleGetParams();
   void handlePostParams();
   void handleResetParams();
+  void handleWifiScan();
+  void handlePostWifi();
+  void handlePostGpio();
   void handleGetLogs();
   void handleClearLogs();
   void handleSendLogCmd();
@@ -60,6 +66,9 @@ private:
   const char* apPass_        = OTA_AP_PASS;
   const char* mdnsHost_      = OTA_MDNS_HOST;
   const char* authToken_     = OTA_AUTH_TOKEN;
+  String      extSsid_       = OTA_STA_SSID;
+  String      extPass_       = OTA_STA_PASS;
+  String      activeStaSsid_;
 
   AppParams* params_         = nullptr;
   AppParamsStore* store_     = nullptr;

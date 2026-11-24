@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -44,8 +45,47 @@ ESP32_BOARD_URL = "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-
 
 META_RE = re.compile(rb"OTA_META:ID=([^;]+);BOARD=([^;]+);VER=([^;]+);")
 TOKEN_DEFINE_RE = re.compile(r'^\s*#define\s+OTA_AUTH_TOKEN\s+"([^"]*)"', re.MULTILINE)
+MDNS_DEFINE_RE = re.compile(r'^\s*#define\s+OTA_MDNS_HOST\s+"([^"]*)"', re.MULTILINE)
 DEFAULT_HOST = "192.168.4.1"
 DEFAULT_TIMEOUT = 15
+
+
+def read_mdns_from_config(config_path: Path = CONFIG_HEADER) -> str:
+    if not config_path.is_file():
+        return "MTR-OTA"
+    text = config_path.read_text(encoding="utf-8", errors="replace")
+    m = MDNS_DEFINE_RE.search(text)
+    return m.group(1) if m else "MTR-OTA"
+
+
+def discover_esp_host(explicit_host: Optional[str] = None) -> str:
+    """
+    Auto-discover the ESP32 whether PC is on MTR-OTA SoftAP (192.168.4.1) OR on
+    the same Home/Lab Wi-Fi router (MTR-OTA.local) in Dual AP+STA mode!
+    """
+    if explicit_host:
+        return explicit_host
+
+    # 1. Fast check for direct MTR-OTA SoftAP IP (192.168.4.1)
+    try:
+        with urllib.request.urlopen(f"http://{DEFAULT_HOST}/api/status", timeout=0.6) as resp:
+            if resp.status == 200:
+                return DEFAULT_HOST
+    except Exception:
+        pass
+
+    # 2. Check mDNS hostname on Home/Lab Wi-Fi (e.g. MTR-OTA.local)
+    mdns_name = f"{read_mdns_from_config()}.local"
+    try:
+        ip = socket.gethostbyname(mdns_name)
+        if ip and ip != "127.0.0.1":
+            with urllib.request.urlopen(f"http://{ip}/api/status", timeout=0.8) as resp:
+                if resp.status == 200:
+                    return ip
+    except Exception:
+        pass
+
+    return DEFAULT_HOST
 
 
 def read_token_from_config(config_path: Path = CONFIG_HEADER) -> str:
@@ -153,12 +193,15 @@ def install_ide_plugin(
 
     target_dir = plugins_dir or default_arduino_plugins_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
-    vsix_path = target_dir / "mtr-ota-web-ide-1.0.0.vsix"
+    # Remove any older v1 VSIX so Arduino IDE only loads the latest v2 plugin
+    for old in target_dir.glob("mtr-ota-web-ide-*.vsix"):
+        old.unlink(missing_ok=True)
+    vsix_path = target_dir / "mtr-ota-web-ide-2.0.0.vsix"
 
-    web_ide_bat = str((repo_root / "web-ide.bat").resolve())
+    repo_str = str(repo_root.resolve())
     pkg_text = (src_dir / "package.json").read_text(encoding="utf-8")
     pkg_obj = json.loads(pkg_text)
-    pkg_obj["contributes"]["configuration"]["properties"]["mtrOta.webIdeBatPath"]["default"] = web_ide_bat
+    pkg_obj["contributes"]["configuration"]["properties"]["mtrOta.repoPath"]["default"] = repo_str
     patched_pkg = json.dumps(pkg_obj, indent=2) + "\n"
 
     content_types = (
@@ -175,9 +218,9 @@ def install_ide_plugin(
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">\n'
         "  <Metadata>\n"
-        '    <Identity Language="en-US" Id="mtr-ota-web-ide" Version="1.0.0" Publisher="ymaged027" />\n'
-        "    <DisplayName>MTR-OTA Web IDE Launcher</DisplayName>\n"
-        '    <Description xml:space="preserve">Adds a 1-click button inside Arduino IDE 2 to launch MTR-OTA Web IDE (web-ide.bat).</Description>\n'
+        '    <Identity Language="en-US" Id="mtr-ota-web-ide" Version="2.0.0" Publisher="ymaged027" />\n'
+        "    <DisplayName>MTR-OTA Suite</DisplayName>\n"
+        '    <Description xml:space="preserve">1-click Web IDE, Quick Wireless Flash, Live ESP32 Telemetry Status Bar, and Rollback inside Arduino IDE 2.</Description>\n'
         "    <Categories>Other</Categories>\n"
         "    <Properties>\n"
         '      <Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.82.0" />\n'
@@ -199,13 +242,19 @@ def install_ide_plugin(
         zf.writestr("[Content_Types].xml", content_types)
         zf.writestr("extension.vsixmanifest", vsix_manifest)
         zf.writestr("extension/package.json", patched_pkg)
-        for fname in ("extension.js", "icon-dark.svg", "icon-light.svg"):
+        for fname in (
+            "extension.js",
+            "icon-dark.svg",
+            "icon-light.svg",
+            "icon-flash-dark.svg",
+            "icon-flash-light.svg",
+        ):
             zf.write(src_dir / fname, f"extension/{fname}")
 
-    # Clear cached deployed copy so Arduino IDE 2 unpacks any updated VSIX cleanly on restart
-    deployed = target_dir.parent / "deployedPlugins" / "mtr-ota-web-ide-1.0.0"
-    if deployed.is_dir():
-        shutil.rmtree(deployed, ignore_errors=True)
+    deployed_root = target_dir.parent / "deployedPlugins"
+    if deployed_root.is_dir():
+        for d in deployed_root.glob("mtr-ota-web-ide-*"):
+            shutil.rmtree(d, ignore_errors=True)
 
     return vsix_path
 
@@ -669,9 +718,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
 def cmd_push(args: argparse.Namespace) -> int:
     sketch_dir = resolve_sketch_dir(args.sketch)
     bin_path = compile_sketch(sketch_dir=sketch_dir, fqbn=args.fqbn)
+    host = discover_esp_host(args.host)
     return do_flash(
         bin_path=bin_path,
-        host=args.host,
+        host=host,
         token=resolve_token(args.token),
         force=args.force,
         no_wait=args.no_wait,
@@ -695,17 +745,32 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    code, status = http_json(args.host, "/api/status")
+    host = discover_esp_host(args.host)
+    code, status = http_json(host, "/api/status")
     if code != 200:
-        print(f"Error (HTTP {code}): {status}", file=sys.stderr)
+        print(f"Error (HTTP {code}) from {host}: {status}", file=sys.stderr)
         return 1
 
-    print("=== Device Status ===")
-    for k in ("deviceId", "board", "version", "partition", "otaState", "armed", "batteryV", "freeHeap", "uptimeSec"):
+    print(f"=== Device Status ({host}) ===")
+    for k in (
+        "deviceId",
+        "board",
+        "version",
+        "partition",
+        "otaState",
+        "staSsid",
+        "staIp",
+        "rssi",
+        "apClients",
+        "armed",
+        "batteryV",
+        "freeHeap",
+        "uptimeSec",
+    ):
         if k in status:
             print(f"  {k:<12}: {status[k]}")
 
-    pcode, params = http_json(args.host, "/api/params")
+    pcode, params = http_json(host, "/api/params")
     if pcode == 200:
         print("=== Live NVS Parameters ===")
         for k, v in params.items():
@@ -716,7 +781,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_flash(args: argparse.Namespace) -> int:
     return do_flash(
         bin_path=Path(args.binary),
-        host=args.host,
+        host=discover_esp_host(args.host),
         token=resolve_token(args.token),
         force=args.force,
         no_wait=args.no_wait,
@@ -726,10 +791,11 @@ def cmd_flash(args: argparse.Namespace) -> int:
 
 
 def cmd_params(args: argparse.Namespace) -> int:
+    host = discover_esp_host(args.host)
     token = resolve_token(args.token)
     if args.reset:
         code, res = http_json(
-            args.host,
+            host,
             "/api/params/reset",
             method="POST",
             headers={"X-OTA-Token": token},
@@ -738,7 +804,7 @@ def cmd_params(args: argparse.Namespace) -> int:
         return 0 if code == 200 and res.get("ok") else 1
 
     if not args.set:
-        code, res = http_json(args.host, "/api/params")
+        code, res = http_json(host, "/api/params")
         print(json.dumps(res, indent=2))
         return 0 if code == 200 else 1
 
@@ -752,7 +818,7 @@ def cmd_params(args: argparse.Namespace) -> int:
 
     body = urllib.parse.urlencode(kv).encode("utf-8")
     code, res = http_json(
-        args.host,
+        host,
         "/api/params",
         method="POST",
         headers={
@@ -766,8 +832,9 @@ def cmd_params(args: argparse.Namespace) -> int:
 
 
 def cmd_rollback(args: argparse.Namespace) -> int:
+    host = discover_esp_host(args.host)
     code, res = http_json(
-        args.host,
+        host,
         "/api/rollback",
         method="POST",
         headers={"X-OTA-Token": resolve_token(args.token)},
@@ -800,7 +867,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_push = sub.add_parser("push", help="ONE-COMMAND compile + wireless OTA flash (supports any .ino or sketch folder)")
     p_push.add_argument("sketch", nargs="?", default=str(SKETCH_DIR), help="Sketch folder or .ino file")
     p_push.add_argument("--fqbn", default=DEFAULT_FQBN, help=f"Board FQBN (default: {DEFAULT_FQBN})")
-    p_push.add_argument("--host", default=DEFAULT_HOST)
+    p_push.add_argument("--host", default=None, help="ESP32 IP/host (auto-discovers 192.168.4.1 / MTR-OTA.local)")
     p_push.add_argument("--token", default=None, help="OTA password (auto-read from src/config.h if omitted)")
     p_push.add_argument("--force", action="store_true")
     p_push.add_argument("--no-wait", action="store_true")
@@ -813,12 +880,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ins.set_defaults(func=cmd_inspect)
 
     p_st = sub.add_parser("status", help="Query device status and live NVS parameters")
-    p_st.add_argument("--host", default=DEFAULT_HOST, help=f"Device IP/host (default: {DEFAULT_HOST})")
+    p_st.add_argument("--host", default=None, help="Device IP/host (auto-discovers 192.168.4.1 / MTR-OTA.local)")
     p_st.set_defaults(func=cmd_status)
 
     p_fl = sub.add_parser("flash", help="Safely flash an already-exported .bin over Wi-Fi")
     p_fl.add_argument("binary", help="Path to compiled .bin file")
-    p_fl.add_argument("--host", default=DEFAULT_HOST)
+    p_fl.add_argument("--host", default=None, help="Device IP/host (auto-discovers 192.168.4.1 / MTR-OTA.local)")
     p_fl.add_argument("--token", default=None, help="OTA password (auto-read from src/config.h if omitted)")
     p_fl.add_argument("--force", action="store_true")
     p_fl.add_argument("--no-wait", action="store_true")
@@ -827,14 +894,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_fl.set_defaults(func=cmd_flash)
 
     p_pa = sub.add_parser("params", help="Read or update live NVS device parameters")
-    p_pa.add_argument("--host", default=DEFAULT_HOST)
+    p_pa.add_argument("--host", default=None, help="Device IP/host (auto-discovers 192.168.4.1 / MTR-OTA.local)")
     p_pa.add_argument("--token", default=None, help="OTA password (auto-read from src/config.h if omitted)")
     p_pa.add_argument("--set", nargs="+", metavar="KEY=VAL", help="Parameters to update")
     p_pa.add_argument("--reset", action="store_true", help="Reset all parameters to defaults")
     p_pa.set_defaults(func=cmd_params)
 
     p_rb = sub.add_parser("rollback", help="Roll back device to the previous OTA firmware slot")
-    p_rb.add_argument("--host", default=DEFAULT_HOST)
+    p_rb.add_argument("--host", default=None, help="Device IP/host (auto-discovers 192.168.4.1 / MTR-OTA.local)")
     p_rb.add_argument("--token", default=None, help="OTA password (auto-read from src/config.h if omitted)")
     p_rb.set_defaults(func=cmd_rollback)
 

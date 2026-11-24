@@ -78,6 +78,10 @@ void OnTheAirEspFacade::setCredentials(const char* ssid,
   ota_.setCredentials(ssid, password, ideHostname);
 }
 
+void OnTheAirEspFacade::setExternalWiFi(const char* staSsid, const char* staPassword) {
+  ota_.setExternalWiFi(staSsid, staPassword);
+}
+
 void OnTheAirEspFacade::setDeviceId(const char* deviceId, const char* version) {
   ota_.setDeviceId(deviceId, version);
 }

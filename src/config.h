@@ -27,11 +27,13 @@
 #define OTA_MDNS_HOST      "MTR-OTA"          // Appears in Arduino IDE Tools -> Port as "MTR-OTA"
 #define OTA_AUTH_TOKEN     "mtr-ota007"       // Arduino IDE OTA password, Web Console & CLI token
 
-// Optional: Connect to an existing team/lab Wi-Fi router first, then fall back to SoftAP.
+// Optional compile-time default Home/Lab Wi-Fi (runs Dual AP+STA simultaneously
+// so your PC keeps internet while MTR-OTA hotspot ALSO stays active!).
+// Tip: Leave "" here and configure your Wi-Fi directly in the Web Portal (saved in NVS)!
 #define OTA_USE_STA_FIRST  false
-#define OTA_STA_SSID       "LAB-WIFI"
-#define OTA_STA_PASS       "changeme123"
-#define OTA_STA_TIMEOUT_MS 8000
+#define OTA_STA_SSID       ""
+#define OTA_STA_PASS       ""
+#define OTA_STA_TIMEOUT_MS 3500
 
 // --- 3. Operating Mode & Hardware Pins (ESP32 NodeMCU-32S) -------------------
 // true  (default): ZERO buttons needed! MTR-OTA Wi-Fi, wireless upload, and

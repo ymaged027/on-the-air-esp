@@ -7,6 +7,7 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ArduinoOTA.h>
+#include <Preferences.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
@@ -23,6 +24,7 @@ extern "C" bool verifyRollbackLater() {
 const char EMBEDDED_FW_META[] = FW_META_STRING;
 
 namespace {
+constexpr const char* WIFI_NVS_NS = "mtr_wifi";
 WebServer g_server(80);
 DNSServer g_dnsServer;
 OtaManager* g_instance = nullptr;
@@ -31,6 +33,22 @@ inline void safeFeedWdt() {
   if (esp_task_wdt_status(NULL) == ESP_OK) {
     esp_task_wdt_reset();
   }
+}
+
+bool isSafeGpioPin(int pin) {
+  if (pin < 0 || pin > 39) return false;
+  // Block SPI flash pins (6..11) and unbonded ESP32 pins
+  if (pin >= 6 && pin <= 11) return false;
+  if (pin == 20 || pin == 24 || (pin >= 28 && pin <= 31)) return false;
+  return true;
+}
+
+bool isInputOnlyPin(int pin) {
+  return pin >= 34 && pin <= 39;
+}
+
+bool isAdc1Pin(int pin) {
+  return pin >= 32 && pin <= 39;
 }
 
 String jsonEscape(const String& in) {
@@ -66,9 +84,41 @@ void OtaManager::setCredentials(const char* ssid, const char* password, const ch
   }
 }
 
+void OtaManager::setExternalWiFi(const char* staSsid, const char* staPassword) {
+  extSsid_ = staSsid ? staSsid : "";
+  extPass_ = staPassword ? staPassword : "";
+}
+
 void OtaManager::setDeviceId(const char* deviceId, const char* version) {
   if (deviceId && deviceId[0]) deviceId_ = deviceId;
   if (version && version[0])   fwVersion_ = version;
+}
+
+bool OtaManager::loadSavedStaCredentials(String& ssidOut, String& passOut) const {
+  if (extSsid_.length() > 0) {
+    ssidOut = extSsid_;
+    passOut = extPass_;
+    return true;
+  }
+  Preferences prefs;
+  if (!prefs.begin(WIFI_NVS_NS, true)) return false;
+  ssidOut = prefs.getString("ssid", "");
+  passOut = prefs.getString("pass", "");
+  prefs.end();
+  return ssidOut.length() > 0;
+}
+
+bool OtaManager::saveStaCredentials(const String& ssid, const String& pass) {
+  Preferences prefs;
+  if (!prefs.begin(WIFI_NVS_NS, false)) return false;
+  if (ssid.length() == 0) {
+    prefs.clear();
+  } else {
+    prefs.putString("ssid", ssid);
+    prefs.putString("pass", pass);
+  }
+  prefs.end();
+  return true;
 }
 
 void OtaManager::begin(AppParams* params,
@@ -164,34 +214,37 @@ void OtaManager::startWirelessServices(bool disarmOutputs) {
     disarmFn_();
   }
 
-  bool connectedSta = false;
+  String staSsid, staPass;
+  const bool wantSta = loadSavedStaCredentials(staSsid, staPass);
+  activeStaSsid_ = staSsid;
 
-#if OTA_USE_STA_FIRST
-  OtaMonitor.printf("[OTA] Connecting to Wi-Fi '%s'...\n", OTA_STA_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(OTA_STA_SSID, OTA_STA_PASS);
-  uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < OTA_STA_TIMEOUT_MS) {
-    safeFeedWdt();
-    delay(200);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    connectedSta = true;
-    OtaMonitor.printf("[OTA] Connected STA IP: %s\n", WiFi.localIP().toString().c_str());
-  } else {
-    OtaMonitor.println(F("[OTA] External Wi-Fi unavailable, falling back to SoftAP."));
-  }
-#endif
+  // Dual AP+STA mode when external Wi-Fi is configured so MTR-OTA hotspot ALWAYS
+  // stays reachable even while connected to home/lab Wi-Fi (with full internet!).
+  WiFi.mode(wantSta ? WIFI_AP_STA : WIFI_AP);
+  WiFi.softAP(apSsid_, apPass_, OTA_AP_CHANNEL);
+  delay(150);
+  IPAddress apIp = WiFi.softAPIP();
+  g_dnsServer.start(53, "*", apIp);
+  dnsActive_ = true;
+  OtaMonitor.printf("[OTA] SoftAP ready: SSID='%s' IP=%s\n",
+                    apSsid_, apIp.toString().c_str());
 
-  if (!connectedSta) {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(apSsid_, apPass_, OTA_AP_CHANNEL);
-    delay(150);
-    IPAddress apIp = WiFi.softAPIP();
-    g_dnsServer.start(53, "*", apIp);
-    dnsActive_ = true;
-    OtaMonitor.printf("[OTA] SoftAP ready: SSID='%s' IP=%s (Captive Portal ON)\n",
-                      apSsid_, apIp.toString().c_str());
+  if (wantSta) {
+    OtaMonitor.printf("[OTA] Joining external Wi-Fi '%s' (Dual AP+STA)...\n", staSsid.c_str());
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(staSsid.c_str(), staPass.c_str());
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < OTA_STA_TIMEOUT_MS) {
+      safeFeedWdt();
+      delay(150);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      OtaMonitor.printf("[OTA] Connected to '%s'! IP=%s (http://%s.local)\n",
+                        staSsid.c_str(), WiFi.localIP().toString().c_str(), mdnsHost_);
+    } else {
+      OtaMonitor.printf("[OTA] '%s' not in range yet (will auto-connect in background; SoftAP active).\n",
+                        staSsid.c_str());
+    }
   }
 
   registerRoutes();
@@ -246,6 +299,9 @@ void OtaManager::registerRoutes() {
   g_server.on("/api/params", HTTP_GET, []() { g_instance->handleGetParams(); });
   g_server.on("/api/params", HTTP_POST, []() { g_instance->handlePostParams(); });
   g_server.on("/api/params/reset", HTTP_POST, []() { g_instance->handleResetParams(); });
+  g_server.on("/api/wifi/scan", HTTP_GET, []() { g_instance->handleWifiScan(); });
+  g_server.on("/api/wifi", HTTP_POST, []() { g_instance->handlePostWifi(); });
+  g_server.on("/api/gpio", HTTP_POST, []() { g_instance->handlePostGpio(); });
   g_server.on("/api/logs", HTTP_GET, []() { g_instance->handleGetLogs(); });
   g_server.on("/api/logs/clear", HTTP_POST, []() { g_instance->handleClearLogs(); });
   g_server.on("/api/logs/send", HTTP_POST, []() { g_instance->handleSendLogCmd(); });
@@ -277,6 +333,18 @@ void OtaManager::handleClient() {
   ArduinoOTA.handle();
   OtaMonitor.handle();
 
+  // Announce STA IP transitions cleanly in OTA Monitor
+  static bool wasStaConnected = false;
+  const bool nowSta = (WiFi.status() == WL_CONNECTED);
+  if (nowSta && !wasStaConnected) {
+    wasStaConnected = true;
+    OtaMonitor.printf("[OTA] External Wi-Fi connected! IP=%s RSSI=%d dBm (http://%s.local)\n",
+                      WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), mdnsHost_);
+  } else if (!nowSta && wasStaConnected) {
+    wasStaConnected = false;
+    OtaMonitor.println(F("[OTA] External Wi-Fi disconnected (MTR-OTA SoftAP still active)."));
+  }
+
   if (maintenanceActive_) {
     static uint32_t lastBlink = 0;
     if (millis() - lastBlink >= 600) {
@@ -303,7 +371,7 @@ void OtaManager::handleMonitorCommand(const String& cmd) {
   lower.toLowerCase();
 
   if (lower == "help" || lower == "?") {
-    OtaMonitor.println(F("OTA Monitor commands: help | status | params | clear | reboot | rollback"));
+    OtaMonitor.println(F("OTA Monitor commands: help | status | wifi | params | clear | reboot | rollback"));
   } else if (lower == "status") {
     const esp_partition_t* running = esp_ota_get_running_partition();
     OtaMonitor.printf("Device=%s v%s | Slot=%s | State=%s | Heap=%u B | Uptime=%lu s\n",
@@ -313,6 +381,15 @@ void OtaManager::handleMonitorCommand(const String& cmd) {
                       getOtaStateString(),
                       (unsigned)ESP.getFreeHeap(),
                       (unsigned long)(millis() / 1000UL));
+  } else if (lower == "wifi") {
+    const bool staOk = (WiFi.status() == WL_CONNECTED);
+    OtaMonitor.printf("AP='%s' (%s, %u clients) | STA='%s' (%s, RSSI=%d dBm)\n",
+                      apSsid_,
+                      WiFi.softAPIP().toString().c_str(),
+                      (unsigned)WiFi.softAPgetStationNum(),
+                      activeStaSsid_.c_str(),
+                      staOk ? WiFi.localIP().toString().c_str() : "disconnected",
+                      staOk ? (int)WiFi.RSSI() : 0);
   } else if (lower == "params" && params_) {
     OtaMonitor.println(AppParamsStore::toJson(*params_));
   } else if (lower == "clear") {
@@ -400,22 +477,32 @@ void OtaManager::handleStatus() {
   bool armed = isArmedFn_ ? isArmedFn_() : false;
   float battV = readBatteryVoltage();
   uint64_t mac = ESP.getEfuseMac();
+  const bool staConn = (WiFi.status() == WL_CONNECTED);
 
   String json;
-  json.reserve(432);
+  json.reserve(640);
   json += '{';
   json += "\"ok\":true,";
-  json += "\"deviceId\":\"" + String(deviceId_) + "\",";
+  json += "\"deviceId\":\"" + jsonEscape(String(deviceId_)) + "\",";
   json += "\"board\":\"" DEVICE_BOARD "\",";
-  json += "\"version\":\"" + String(fwVersion_) + "\",";
+  json += "\"version\":\"" + jsonEscape(String(fwVersion_)) + "\",";
   json += "\"chipId\":\"" + String((uint32_t)(mac >> 32), HEX) + String((uint32_t)mac, HEX) + "\",";
   json += "\"partition\":\"" + String(partLabel) + "\",";
   json += "\"otaState\":\"" + String(getOtaStateString()) + "\",";
+  json += "\"mdns\":\"" + jsonEscape(String(mdnsHost_)) + ".local\",";
+  json += "\"apSsid\":\"" + jsonEscape(String(apSsid_)) + "\",";
+  json += "\"apIp\":\"" + WiFi.softAPIP().toString() + "\",";
+  json += "\"apClients\":" + String(WiFi.softAPgetStationNum()) + ',';
+  json += "\"staSsid\":\"" + jsonEscape(activeStaSsid_) + "\",";
+  json += "\"staConnected\":" + String(staConn ? "true" : "false") + ',';
+  json += "\"staIp\":\"" + (staConn ? WiFi.localIP().toString() : String("")) + "\",";
+  json += "\"rssi\":" + String(staConn ? (int)WiFi.RSSI() : 0) + ',';
   json += "\"monitorPort\":" + String(OTA_MONITOR_PORT) + ',';
   json += "\"authRequired\":" + String(isAuthRequired() ? "true" : "false") + ',';
   json += "\"armed\":" + String(armed ? "true" : "false") + ',';
   json += "\"batteryMonitor\":" + String(BATTERY_MONITOR_ENABLED ? "true" : "false") + ',';
   json += "\"batteryV\":" + String(battV, 2) + ',';
+  json += "\"cpuMhz\":" + String(ESP.getCpuFreqMHz()) + ',';
   json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ',';
   json += "\"uptimeSec\":" + String(millis() / 1000UL);
   json += '}';
@@ -472,6 +559,120 @@ void OtaManager::handleResetParams() {
   OtaMonitor.println(F("[OTA] Reset NVS params to defaults."));
   String resp = "{\"ok\":true,\"params\":" + AppParamsStore::toJson(*params_) + "}";
   g_server.send(200, "application/json", resp);
+}
+
+void OtaManager::handleWifiScan() {
+  int n = WiFi.scanNetworks(false, false, false, 150);
+  String json = "{\"ok\":true,\"networks\":[";
+  for (int i = 0; i < n; ++i) {
+    if (i > 0) json += ',';
+    json += "{\"ssid\":\"" + jsonEscape(WiFi.SSID(i)) + "\",";
+    json += "\"rssi\":" + String(WiFi.RSSI(i)) + ',';
+    json += "\"open\":" + String(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "true" : "false") + '}';
+  }
+  json += "]}";
+  WiFi.scanDelete();
+  g_server.send(200, "application/json", json);
+}
+
+void OtaManager::handlePostWifi() {
+  if (!checkAuthAndReply()) return;
+
+  String ssid = g_server.arg("ssid");
+  String pass = g_server.arg("password");
+  ssid.trim();
+
+  if (!saveStaCredentials(ssid, pass)) {
+    g_server.send(500, "application/json", "{\"ok\":false,\"error\":\"Failed to save Wi-Fi to NVS\"}");
+    return;
+  }
+
+  activeStaSsid_ = ssid;
+  if (ssid.length() == 0) {
+    WiFi.disconnect(false, true);
+    WiFi.mode(WIFI_AP);
+    OtaMonitor.println(F("[OTA] Cleared external Wi-Fi (SoftAP-only mode)."));
+    g_server.send(200, "application/json", "{\"ok\":true,\"message\":\"External Wi-Fi forgotten (MTR-OTA SoftAP active).\"}");
+    return;
+  }
+
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  OtaMonitor.printf("[OTA] Saved & connecting to external Wi-Fi '%s'...\n", ssid.c_str());
+  g_server.send(200, "application/json",
+                "{\"ok\":true,\"message\":\"Saved! Connecting to '" + jsonEscape(ssid) + "' in Dual AP+STA mode...\"}");
+}
+
+void OtaManager::handlePostGpio() {
+  if (!checkAuthAndReply()) return;
+
+  int pin = g_server.hasArg("pin") ? g_server.arg("pin").toInt() : -1;
+  String action = g_server.arg("action");
+  action.toLowerCase();
+
+  if (!isSafeGpioPin(pin)) {
+    g_server.send(400, "application/json", "{\"ok\":false,\"error\":\"Unsafe or invalid ESP32 GPIO pin\"}");
+    return;
+  }
+
+  if (action == "dread") {
+    pinMode(pin, isInputOnlyPin(pin) ? INPUT : INPUT_PULLUP);
+    int val = digitalRead(pin);
+    g_server.send(200, "application/json",
+                  "{\"ok\":true,\"pin\":" + String(pin) + ",\"value\":" + String(val) +
+                  ",\"summary\":\"GPIO " + String(pin) + " digitalRead = " + (val ? "HIGH (1)" : "LOW (0)") + "\"}");
+    return;
+  }
+
+  if (action == "aread") {
+    if (!isAdc1Pin(pin)) {
+      g_server.send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"GPIO " + String(pin) +
+                    " is on ADC2 (unavailable while Wi-Fi is active). Use ADC1: GPIO 32-39.\"}");
+      return;
+    }
+    int raw = analogRead(pin);
+    uint32_t mv = analogReadMilliVolts(pin);
+    g_server.send(200, "application/json",
+                  "{\"ok\":true,\"pin\":" + String(pin) + ",\"raw\":" + String(raw) + ",\"mv\":" + String(mv) +
+                  ",\"summary\":\"GPIO " + String(pin) + " = " + String(raw) + " (" + String(mv) + " mV)\"}");
+    return;
+  }
+
+  // Output actions blocked when device is armed or pin is input-only (34..39)
+  if (isArmedFn_ && isArmedFn_()) {
+    g_server.send(400, "application/json", "{\"ok\":false,\"error\":\"Outputs are ARMED — disarm before testing GPIO\"}");
+    return;
+  }
+  if (isInputOnlyPin(pin)) {
+    g_server.send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"GPIO " + String(pin) + " is input-only (34-39 cannot output HIGH/LOW/PWM)\"}");
+    return;
+  }
+
+  if (action == "high" || action == "low") {
+    int level = (action == "high") ? HIGH : LOW;
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, level);
+    OtaMonitor.printf("[GPIO] Set GPIO %d -> %s\n", pin, level ? "HIGH" : "LOW");
+    g_server.send(200, "application/json",
+                  "{\"ok\":true,\"pin\":" + String(pin) + ",\"summary\":\"GPIO " + String(pin) + " set " +
+                  (level ? "HIGH" : "LOW") + "\"}");
+    return;
+  }
+
+  if (action == "pwm") {
+    int duty = constrain(g_server.arg("value").toInt(), 0, 255);
+    analogWrite(pin, duty);
+    OtaMonitor.printf("[GPIO] PWM GPIO %d -> %d/255\n", pin, duty);
+    g_server.send(200, "application/json",
+                  "{\"ok\":true,\"pin\":" + String(pin) + ",\"duty\":" + String(duty) +
+                  ",\"summary\":\"GPIO " + String(pin) + " PWM = " + String(duty) + "/255\"}");
+    return;
+  }
+
+  g_server.send(400, "application/json", "{\"ok\":false,\"error\":\"Unknown GPIO action\"}");
 }
 
 void OtaManager::handleGetLogs() {

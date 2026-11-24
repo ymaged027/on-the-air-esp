@@ -53,12 +53,15 @@ void loop() {
 
 Power on your ESP32 and connect Wi-Fi to **`MTR-OTA`** (password: **`mtr-ota007`**). Because **Always-On Mode** runs `MTR-OTA`, wireless flashing, and **OTA Monitor** in the background on **Core 0** while your sketch runs on **Core 1**, you **never have to press `BOOT` or `EN`** between uploads!
 
-1. **Direct Inside Arduino IDE:** Select **Tools → Port → `MTR-OTA at 192.168.4.1`** → click **Upload (→)** → password **`mtr-ota007`**.
-2. **1-Click `flash.bat` (Windows):** Double-click **`flash.bat`** to compile & flash the starter sketch — or **drag & drop ANY `.ino` file onto `flash.bat`**!
-3. **Web Portal + `.ino` Upload & Code Window (Launch Directly From Arduino IDE!):**
-   - `setup-usb.bat` / `install-library.bat` installs the **`MTR-OTA Web IDE`** plugin inside Arduino IDE 2 (top Editor Toolbar Wi-Fi icon + bottom Status Bar **`MTR-OTA Web IDE`** button + shortcut **`Ctrl+Alt+W`**) to launch **`web-ide.bat`** in 1 click!
-   - Drag & drop any **`.ino`** file or **`.bin`** file, or paste Arduino C++ code directly in the **Code Window**, and click **Compile & Flash to ESP32** (automatically keeps `OnTheAirESP.begin()` included so you never lose OTA!).
-   - Also includes live **OTA Monitor**, live NVS parameter tuning, and 1-click Rollback.
+1. **Direct Inside Arduino IDE (2 Toolbar Buttons + Live Status Bar!):**
+   - **Editor Toolbar:** Click the **Wi-Fi icon (`Ctrl+Alt+W`)** to open the Web IDE with your current sketch synced, or click the **Lightning Bolt icon (`Ctrl+Alt+U`)** for 1-click **Quick Wireless Flash (HTTP OTA)** right inside Arduino IDE's Output panel (no external `cmd` window!).
+   - **Bottom Status Bar:** Shows live ESP32 telemetry (`MTR-OTA v1.0.0 [app0 • -52dBm]`) — click it (`Ctrl+Alt+M`) for 1-click **Rollback**, **Reboot**, **OTA Monitor**, or **Stop Server**.
+   - Or use **Tools → Port → `MTR-OTA`** → **Upload (→)** (password: `mtr-ota007`).
+2. **1-Click `flash.bat` (Windows):** Double-click **`flash.bat`** — or **drag & drop ANY `.ino` file onto `flash.bat`**! Auto-discovers `192.168.4.1` and `MTR-OTA.local`.
+3. **Web Portal + Line-Numbered Code Window + Dual Wi-Fi + GPIO Tester:**
+   - **Line-Numbered Code Window:** Supports **`Ctrl+Enter`** to Compile & Flash, **`Ctrl+S`** to Verify, and drag-and-drop `.ino` / `.bin` files.
+   - **Dual Wi-Fi (`WIFI_AP_STA` — Keep Internet While Flashing!):** Scan & save your Home/Lab Wi-Fi right in the Web Portal (stored in NVS — never in Git!). Your ESP32 joins your router (`http://MTR-OTA.local`) so your PC keeps full internet, while **`MTR-OTA`** (`192.168.4.1`) stays active simultaneously!
+   - **Live GPIO & Sensor Tester:** Toggle pins `HIGH`/`LOW`, sweep `PWM (0–255)`, or read `Digital` / `ADC1 (mV)` live in the browser without writing code.
 
 ---
 

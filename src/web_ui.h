@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-// Single-page Web Console + .ino/.bin Upload + Code Editor + Live OTA Monitor (PROGMEM).
+// Single-page Web Console + Line-Numbered Code Editor + Dual Wi-Fi + GPIO Tester + OTA Monitor (PROGMEM).
 static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,7 +13,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   :root{--bg:#0d1117;--card:#161b22;--bd:#30363d;--tx:#e6edf3;--mut:#8b949e;--acc:#58a6ff;--ok:#3fb950;--warn:#d29922;--err:#f85149}
   *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   body{margin:0;background:var(--bg);color:var(--tx);padding:16px}
-  .wrap{max-width:820px;margin:0 auto}
+  .wrap{max-width:860px;margin:0 auto}
   h1{margin:0 0 4px;font-size:1.35rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .sub{color:var(--mut);font-size:.88rem;margin:0 0 16px}
   .badge{font-size:.74rem;padding:3px 8px;border-radius:999px;font-weight:600;border:1px solid var(--bd)}
@@ -22,21 +22,21 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .b-err{background:#2d1215;color:var(--err);border-color:#da3633}
   .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:14px}
   .card h2{margin:0 0 12px;font-size:1.02rem;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
   .kv{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px}
-  .kv .k{color:var(--mut);font-size:.73rem;text-transform:uppercase;letter-spacing:.04em}
-  .kv .v{font-size:1.02rem;font-weight:600;margin-top:3px;word-break:break-all}
+  .kv .k{color:var(--mut);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .kv .v{font-size:.98rem;font-weight:600;margin-top:3px;word-break:break-all}
   label{display:block;font-size:.84rem;color:var(--mut);margin-bottom:4px}
   input,select,textarea{width:100%;padding:8px 10px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:7px;font-size:.92rem}
   .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px}
-  .btn{background:var(--acc);color:#0d1117;border:none;border-radius:7px;padding:9px 15px;font-weight:700;cursor:pointer;font-size:.9rem}
+  .btn{background:var(--acc);color:#0d1117;border:none;border-radius:7px;padding:9px 14px;font-weight:700;cursor:pointer;font-size:.88rem}
   .btn:disabled{opacity:.45;cursor:not-allowed}
-  .btn-sm{padding:5px 10px;font-size:.8rem}
+  .btn-sm{padding:5px 10px;font-size:.79rem}
   .btn-ok{background:var(--ok);color:#0d1117}
   .btn-sec{background:#21262d;color:var(--tx);border:1px solid var(--bd)}
   .btn-warn{background:var(--warn);color:#0d1117}
   .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
-  .drop{border:2px dashed var(--bd);border-radius:10px;padding:20px;text-align:center;margin:10px 0;background:var(--bg);cursor:pointer;transition:border-color .15s,background .15s}
+  .drop{border:2px dashed var(--bd);border-radius:10px;padding:18px;text-align:center;margin:10px 0;background:var(--bg);cursor:pointer;transition:border-color .15s,background .15s}
   .drop.over{border-color:var(--acc);background:#0c1929}
   .file-name{margin-top:8px;font-size:.88rem;color:var(--acc);font-weight:600}
   .bar-bg{height:12px;background:var(--bg);border:1px solid var(--bd);border-radius:999px;overflow:hidden;margin-top:10px;display:none}
@@ -46,13 +46,16 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .msg.err{display:block;background:#2d1215;color:var(--err);border:1px solid #da3633}
   .msg.info{display:block;background:#0c2d6b;color:#79c0ff;border:1px solid #1f6feb}
   .term{background:#05070b;color:#7ee787;border:1px solid var(--bd);border-radius:8px;padding:12px;height:210px;overflow-y:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.83rem;line-height:1.42;white-space:pre-wrap;word-break:break-word;margin:0}
-  .code-ed{background:#05070b;color:#e6edf3;border:1px solid var(--bd);border-radius:8px;padding:12px;min-height:250px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.85rem;line-height:1.45;tab-size:2}
-  .code-ed.over{border-color:var(--acc);background:#0c1929}
+  .ed-wrap{display:flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:#05070b;height:290px}
+  .ed-wrap.over{border-color:var(--acc)}
+  .gutter{margin:0;padding:12px 8px;background:#0b0f16;color:#484f58;border-right:1px solid var(--bd);text-align:right;user-select:none;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.85rem;line-height:1.45;min-width:42px}
+  .code-ed{border:none;border-radius:0;background:transparent;color:#e6edf3;padding:12px;height:100%;resize:none;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.85rem;line-height:1.45;tab-size:2;white-space:pre;overflow:auto;outline:none}
   .cmd-row{display:flex;gap:8px;margin-top:8px}
   .cmd-row input{flex:1;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
   .chk{display:flex;align-items:center;gap:6px;font-size:.84rem;color:var(--mut);margin-top:8px;cursor:pointer}
   .chk input{width:auto;margin:0}
   .hint{font-size:.8rem;color:var(--mut);margin-top:6px}
+  kbd{background:#21262d;border:1px solid var(--bd);border-radius:4px;padding:1px 5px;font-size:.76rem;color:var(--tx)}
 </style>
 </head>
 <body>
@@ -61,8 +64,9 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <span id="titleId">MTR-OTA</span>
     <span class="badge b-ok" id="badgeArmed">DISARMED</span>
     <span class="badge b-warn" id="badgeOta">CHECKING...</span>
+    <span class="badge b-ok" id="badgeWifi" style="display:none"></span>
   </h1>
-  <p class="sub">ESP32 NodeMCU-32S Wireless Code Studio, .ino/.bin Flasher &amp; OTA Monitor</p>
+  <p class="sub">ESP32 NodeMCU-32S Wireless Code Studio, Dual Wi-Fi OTA, GPIO Tester &amp; OTA Monitor</p>
 
   <div class="card">
     <h2>Device Telemetry</h2>
@@ -70,26 +74,31 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       <div class="kv"><div class="k">Firmware</div><div class="v" id="stVer">-</div></div>
       <div class="kv"><div class="k">Active Slot</div><div class="v" id="stPart">-</div></div>
       <div class="kv"><div class="k">OTA State</div><div class="v" id="stState">-</div></div>
-      <div class="kv"><div class="k">Battery</div><div class="v" id="stBatt">-</div></div>
+      <div class="kv"><div class="k">Home Wi-Fi IP</div><div class="v" id="stSta">-</div></div>
+      <div class="kv"><div class="k">Signal / AP</div><div class="v" id="stSig">-</div></div>
       <div class="kv"><div class="k">Free Heap</div><div class="v" id="stHeap">-</div></div>
       <div class="kv"><div class="k">Uptime</div><div class="v" id="stUp">-</div></div>
+      <div class="kv"><div class="k">Battery</div><div class="v" id="stBatt">-</div></div>
     </div>
   </div>
 
   <div class="card">
     <h2>
-      <span>Code Window (Paste or Drop <code>.ino</code> File)</span>
+      <span>Code Window <span style="font-weight:400;color:var(--mut);font-size:.8rem">(<kbd>Ctrl+Enter</kbd> Flash &bull; <kbd>Ctrl+S</kbd> Verify)</span></span>
       <span class="badge b-warn" id="studioBadge">CHECKING COMPILER...</span>
     </h2>
-    <textarea class="code-ed" id="codeEd" spellcheck="false"></textarea>
+    <div class="ed-wrap" id="edWrap">
+      <pre class="gutter" id="edGutter">1</pre>
+      <textarea class="code-ed" id="codeEd" spellcheck="false"></textarea>
+    </div>
     <input id="inoPicker" type="file" accept=".ino,.cpp,.h,.txt" style="display:none">
     <label class="chk">
       <input type="checkbox" id="chkKeepOta" checked>
       Auto-keep MTR-OTA active (automatically adds <code>OnTheAirESP.begin()</code> if missing)
     </label>
     <div class="actions">
-      <button class="btn btn-ok" id="btnCodeFlash">Compile &amp; Flash to ESP32</button>
-      <button class="btn btn-sec" id="btnCodeCompile">Verify Only</button>
+      <button class="btn btn-ok" id="btnCodeFlash">Compile &amp; Flash (Ctrl+Enter)</button>
+      <button class="btn btn-sec" id="btnCodeCompile">Verify Only (Ctrl+S)</button>
       <button class="btn btn-sec" id="btnOpenIno">Open .ino File</button>
       <button class="btn btn-sec" id="btnCodeReset">Load Example</button>
       <button class="btn btn-sec" id="btnCodeDl">Download .ino</button>
@@ -109,7 +118,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     </h2>
     <pre class="term" id="monOut">Connecting to OTA Monitor...</pre>
     <div class="cmd-row">
-      <input id="monCmd" type="text" placeholder="Type command (help, status, params, reboot, rollback)...">
+      <input id="monCmd" type="text" placeholder="Type command (help, status, wifi, params, reboot, rollback)...">
       <button class="btn" id="btnMonSend">Send</button>
     </div>
   </div>
@@ -118,6 +127,75 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <h2>OTA Password</h2>
     <label for="token">Saved automatically in this browser (default: <code>mtr-ota007</code>)</label>
     <input id="token" type="password" placeholder="Enter OTA password">
+  </div>
+
+  <div class="card">
+    <h2>
+      <span>Home / Lab Wi-Fi (Dual AP+STA &mdash; Keep Internet While Flashing!)</span>
+      <button class="btn btn-sec btn-sm" id="btnWifiScan">Scan Networks</button>
+    </h2>
+    <div class="row">
+      <div>
+        <label>Wi-Fi Network (SSID)</label>
+        <input id="wSsid" type="text" list="wifiList" placeholder="e.g. Home/Lab Wi-Fi name">
+        <datalist id="wifiList"></datalist>
+      </div>
+      <div>
+        <label>Wi-Fi Password</label>
+        <input id="wPass" type="password" placeholder="Router WPA2 password">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnWifiSave">Connect &amp; Save to NVS</button>
+      <button class="btn btn-sec" id="btnWifiForget">Forget Wi-Fi (AP Only)</button>
+    </div>
+    <div class="hint">MTR-OTA hotspot (<code>192.168.4.1</code>) stays active at the same time, and your PC can reach the ESP32 on your router via <code>http://MTR-OTA.local</code>!</div>
+    <div class="msg" id="wifiMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Live GPIO &amp; Sensor Tester (Instant Hardware Check)</h2>
+    <div class="row">
+      <div>
+        <label>Safe NodeMCU-32S Pin</label>
+        <select id="gpioPin">
+          <option value="2">GPIO 2 (Onboard Blue LED)</option>
+          <option value="4">GPIO 4</option>
+          <option value="5">GPIO 5</option>
+          <option value="12">GPIO 12</option>
+          <option value="13">GPIO 13</option>
+          <option value="14">GPIO 14 (OUT 4)</option>
+          <option value="16">GPIO 16</option>
+          <option value="17">GPIO 17</option>
+          <option value="18">GPIO 18</option>
+          <option value="19">GPIO 19</option>
+          <option value="21">GPIO 21 (SDA)</option>
+          <option value="22">GPIO 22 (SCL)</option>
+          <option value="23">GPIO 23</option>
+          <option value="25">GPIO 25 (OUT 1)</option>
+          <option value="26">GPIO 26 (OUT 2)</option>
+          <option value="27">GPIO 27 (OUT 3)</option>
+          <option value="32">GPIO 32 (ADC1 / I/O)</option>
+          <option value="33">GPIO 33 (ADC1 / I/O)</option>
+          <option value="34">GPIO 34 (ADC1 Input-Only)</option>
+          <option value="35">GPIO 35 (ADC1 Input-Only)</option>
+          <option value="36">GPIO 36 / VP (ADC1 Input-Only)</option>
+          <option value="39">GPIO 39 / VN (ADC1 Input-Only)</option>
+        </select>
+      </div>
+      <div>
+        <label>PWM Duty (<span id="pwmValLbl">128</span> / 255)</label>
+        <input id="gpioPwm" type="range" min="0" max="255" value="128" style="padding:6px 0">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-ok btn-sm" id="btnGpioHigh">Set HIGH</button>
+      <button class="btn btn-sec btn-sm" id="btnGpioLow">Set LOW</button>
+      <button class="btn btn-sm" id="btnGpioPwm">Apply PWM</button>
+      <button class="btn btn-sec btn-sm" id="btnGpioDRead">Digital Read</button>
+      <button class="btn btn-sec btn-sm" id="btnGpioARead">Analog Read (ADC1)</button>
+    </div>
+    <div class="msg" id="gpioMsg"></div>
   </div>
 
   <div class="card">
@@ -154,7 +232,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <h2>Upload File (.ino or .bin)</h2>
     <div class="drop" id="dropZone">
       <div><b>Drag &amp; drop</b> any <code>.ino</code> sketch or <code>.ino.bin</code> file here, or <b>click to choose</b></div>
-      <div style="font-size:.8rem;color:var(--mut);margin-top:4px"><code>.ino</code> auto-compiles &amp; flashes via background compiler &bull; <code>.bin</code> flashes directly</div>
+      <div style="font-size:.8rem;color:var(--mut);margin-top:4px"><code>.ino</code> auto-compiles &amp; flashes &bull; <code>.bin</code> flashes directly</div>
       <div class="file-name" id="fileLabel"></div>
       <input id="binFile" type="file" accept=".bin,.ino" style="display:none">
     </div>
@@ -211,32 +289,55 @@ function getToken() {
   return t;
 }
 
-// --- Code Window + .ino File Loader + Silent Compiler Detection ---
+// --- Code Window with Line-Number Gutter & Keyboard Shortcuts ---
 const ed = $("codeEd");
+const gut = $("edGutter");
+function updateGutter() {
+  const n = (ed.value.match(/\n/g) || []).length + 1;
+  let s = "";
+  for (let i = 1; i <= n; i++) s += i + "\n";
+  gut.textContent = s;
+  gut.scrollTop = ed.scrollTop;
+}
+function setEditorCode(txt) {
+  ed.value = txt;
+  localStorage.setItem("ota_web_code", txt);
+  updateGutter();
+}
 ed.value = localStorage.getItem("ota_web_code") || DEFAULT_CODE;
-ed.addEventListener("input", () => localStorage.setItem("ota_web_code", ed.value));
+updateGutter();
+ed.addEventListener("input", () => { localStorage.setItem("ota_web_code", ed.value); updateGutter(); });
+ed.addEventListener("scroll", () => { gut.scrollTop = ed.scrollTop; });
 ed.addEventListener("keydown", e => {
   if (e.key === "Tab") {
     e.preventDefault();
     const s = ed.selectionStart, end = ed.selectionEnd;
     ed.value = ed.value.substring(0, s) + "  " + ed.value.substring(end);
     ed.selectionStart = ed.selectionEnd = s + 2;
+    updateGutter();
+  } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    e.preventDefault();
+    runCodeAction(true);
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+    e.preventDefault();
+    localStorage.setItem("ota_web_code", ed.value);
+    runCodeAction(false);
   }
 });
 
 async function loadInoIntoEditor(file) {
   const txt = await file.text();
-  ed.value = txt;
-  localStorage.setItem("ota_web_code", txt);
-  showMsg($("codeMsg"), "info", "Loaded " + file.name + " (" + txt.length + " chars) into Code Window. Click 'Compile & Flash to ESP32'!");
+  setEditorCode(txt);
+  showMsg($("codeMsg"), "info", "Loaded " + file.name + " (" + txt.length + " chars). Press Ctrl+Enter or click 'Compile & Flash'!");
 }
 
-ed.addEventListener("dragover", e => { e.preventDefault(); ed.classList.add("over"); });
-ed.addEventListener("dragleave", () => ed.classList.remove("over"));
-ed.addEventListener("drop", async e => {
+const ew = $("edWrap");
+ew.addEventListener("dragover", e => { e.preventDefault(); ew.classList.add("over"); });
+ew.addEventListener("dragleave", () => ew.classList.remove("over"));
+ew.addEventListener("drop", async e => {
   if (e.dataTransfer.files && e.dataTransfer.files.length) {
     e.preventDefault();
-    ed.classList.remove("over");
+    ew.classList.remove("over");
     await loadInoIntoEditor(e.dataTransfer.files[0]);
   }
 });
@@ -257,9 +358,18 @@ async function detectStudio() {
       const d = await r.json();
       if (d && d.studio) {
         studioBase = base;
-        $("studioBadge").textContent = "COMPILER READY";
+        $("studioBadge").textContent = "COMPILER READY" + (d.espHost ? " (" + d.espHost + ")" : "");
         $("studioBadge").className = "badge b-ok";
-        $("studioHint").textContent = "Connected to MTR-OTA Web IDE — paste code or drop any .ino file and click Compile & Flash!";
+        $("studioHint").textContent = "Connected to MTR-OTA Web IDE — paste code or drop any .ino file and press Ctrl+Enter!";
+        // Auto-pull sketch synced from Arduino IDE button if present
+        try {
+          const sr = await fetch(base + "/local/pending-sketch", {cache: "no-store"});
+          const sd = await sr.json();
+          if (sd && sd.hasSketch && sd.code) {
+            setEditorCode(sd.code);
+            showMsg($("codeMsg"), "info", "Synced '" + (sd.name || "sketch.ino") + "' directly from Arduino IDE!");
+          }
+        } catch (e) {}
         return true;
       }
     } catch (e) {}
@@ -283,7 +393,7 @@ async function runCodeAction(doFlash, codeOverride = null) {
   $("btnFlash").disabled = true;
   $("buildOut").style.display = "block";
   $("buildOut").textContent = doFlash ? "Compiling & flashing to ESP32 over Wi-Fi...\n" : "Compiling sketch...\n";
-  showMsg($("codeMsg"), "info", doFlash ? "Compiling & flashing (usually 5-15s)..." : "Compiling...");
+  showMsg($("codeMsg"), "info", doFlash ? "Compiling & flashing (usually 5-15s)..." : "Verifying sketch...");
 
   try {
     const r = await fetch(studioBase + "/local/compile", {
@@ -300,13 +410,13 @@ async function runCodeAction(doFlash, codeOverride = null) {
     $("buildOut").textContent = d.output || "";
     $("buildOut").scrollTop = $("buildOut").scrollHeight;
     if (r.ok && d.ok) {
-      showMsg($("codeMsg"), "ok", d.message || (doFlash ? "Compiled & flashed!" : "Compile succeeded!"));
+      showMsg($("codeMsg"), "ok", d.message || (doFlash ? "Compiled & flashed!" : "Verified cleanly (0 errors)!"));
       if (doFlash) setTimeout(waitReconnect, 2500);
     } else {
       showMsg($("codeMsg"), "err", d.error || "Compile/Flash failed (see build log below).");
     }
   } catch (e) {
-    showMsg($("codeMsg"), "err", "Lost connection to background compiler: " + e);
+    showMsg($("codeMsg"), "err", "Lost connection to Web IDE compiler: " + e);
   } finally {
     $("btnCodeFlash").disabled = false;
     $("btnCodeCompile").disabled = false;
@@ -317,8 +427,7 @@ async function runCodeAction(doFlash, codeOverride = null) {
 $("btnCodeFlash").onclick = () => runCodeAction(true);
 $("btnCodeCompile").onclick = () => runCodeAction(false);
 $("btnCodeReset").onclick = () => {
-  ed.value = DEFAULT_CODE;
-  localStorage.setItem("ota_web_code", ed.value);
+  setEditorCode(DEFAULT_CODE);
   showMsg($("codeMsg"), "info", "Loaded starter example using OnTheAirESP.params() + OtaMonitor.");
 };
 $("btnCodeDl").onclick = () => {
@@ -329,6 +438,82 @@ $("btnCodeDl").onclick = () => {
   a.click();
 };
 
+// --- Dual Wi-Fi Setup ---
+$("btnWifiScan").onclick = async () => {
+  $("btnWifiScan").disabled = true;
+  showMsg($("wifiMsg"), "info", "Scanning 2.4 GHz Wi-Fi networks...");
+  try {
+    const r = await fetch("/api/wifi/scan");
+    const d = await r.json();
+    const dl = $("wifiList");
+    dl.innerHTML = "";
+    (d.networks || []).forEach(n => {
+      const opt = document.createElement("option");
+      opt.value = n.ssid;
+      opt.label = n.ssid + " (" + n.rssi + " dBm" + (n.open ? ", open" : "") + ")";
+      dl.appendChild(opt);
+    });
+    if (d.networks && d.networks.length && !$("wSsid").value) $("wSsid").value = d.networks[0].ssid;
+    showMsg($("wifiMsg"), "ok", "Found " + (d.networks || []).length + " network(s). Pick or type SSID above.");
+  } catch (e) {
+    showMsg($("wifiMsg"), "err", "Scan failed: " + e);
+  } finally {
+    $("btnWifiScan").disabled = false;
+  }
+};
+
+$("btnWifiSave").onclick = async () => {
+  const ssid = $("wSsid").value.trim();
+  if (!ssid) return showMsg($("wifiMsg"), "err", "Enter a Wi-Fi SSID (or click Forget Wi-Fi).");
+  const r = await fetch("/api/wifi", {
+    method: "POST",
+    headers: {"X-OTA-Token": getToken(), "Content-Type": "application/x-www-form-urlencoded"},
+    body: new URLSearchParams({ssid, password: $("wPass").value})
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.ok) showMsg($("wifiMsg"), "ok", d.message || "Saved! Check Home Wi-Fi IP in Telemetry above in ~4s.");
+  else showMsg($("wifiMsg"), "err", "Failed: " + (d.error || r.status));
+};
+
+$("btnWifiForget").onclick = async () => {
+  const r = await fetch("/api/wifi", {
+    method: "POST",
+    headers: {"X-OTA-Token": getToken(), "Content-Type": "application/x-www-form-urlencoded"},
+    body: new URLSearchParams({ssid: "", password: ""})
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.ok) {
+    $("wSsid").value = "";
+    $("wPass").value = "";
+    showMsg($("wifiMsg"), "ok", d.message || "External Wi-Fi cleared.");
+  } else {
+    showMsg($("wifiMsg"), "err", "Failed: " + (d.error || r.status));
+  }
+};
+
+// --- Live GPIO & Sensor Tester ---
+$("gpioPwm").oninput = e => { $("pwmValLbl").textContent = e.target.value; };
+async function sendGpio(action) {
+  const body = new URLSearchParams({
+    pin: $("gpioPin").value,
+    action,
+    value: $("gpioPwm").value
+  });
+  const r = await fetch("/api/gpio", {
+    method: "POST",
+    headers: {"X-OTA-Token": getToken(), "Content-Type": "application/x-www-form-urlencoded"},
+    body
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.ok) showMsg($("gpioMsg"), "ok", d.summary || "OK");
+  else showMsg($("gpioMsg"), "err", d.error || ("HTTP " + r.status));
+}
+$("btnGpioHigh").onclick  = () => sendGpio("high");
+$("btnGpioLow").onclick   = () => sendGpio("low");
+$("btnGpioPwm").onclick   = () => sendGpio("pwm");
+$("btnGpioDRead").onclick = () => sendGpio("dread");
+$("btnGpioARead").onclick = () => sendGpio("aread");
+
 // --- File Upload (.ino OR .bin) ---
 async function setFile(f) {
   selectedFile = f;
@@ -336,7 +521,7 @@ async function setFile(f) {
   $("fileLabel").textContent = f.name + " (" + Math.max(1, Math.round(f.size / 1024)) + " KB)";
   if (f.name.toLowerCase().endsWith(".ino")) {
     await loadInoIntoEditor(f);
-    showMsg($("otaMsg"), "info", "Arduino sketch (.ino) selected & loaded into Code Window — click 'Flash File' to compile & flash!");
+    showMsg($("otaMsg"), "info", "Arduino sketch (.ino) loaded into Code Window — click 'Flash File' to compile & flash!");
   } else if (/bootloader|partitions|boot_app0/i.test(f.name)) {
     showMsg($("otaMsg"), "err", "Wrong file! Pick *.ino.bin or *.ino (NOT bootloader or partitions).");
   } else {
@@ -410,19 +595,32 @@ $("btnMonClear").onclick = async () => {
 };
 
 // --- Telemetry & Parameters ---
+let wifiFieldInit = false;
 async function fetchStatus() {
   try {
     const r = await fetch("/api/status");
     const d = await r.json();
+    if (!d.ok) return null;
     deviceId = d.deviceId || "";
     $("titleId").textContent = d.deviceId + " (" + d.board + ")";
     $("stVer").textContent = "v" + d.version;
     $("stPart").textContent = d.partition;
     $("stState").textContent = d.otaState;
+    $("stSta").textContent = d.staConnected ? d.staIp : (d.staSsid ? "Connecting..." : "AP Only");
+    $("stSig").textContent = d.staConnected ? (d.rssi + " dBm • " + (d.apClients || 0) + " AP") : ((d.apClients || 0) + " AP client(s)");
     $("stBatt").textContent = d.batteryMonitor ? (d.batteryV.toFixed(2) + " V") : "Disabled";
     $("stHeap").textContent = Math.round(d.freeHeap / 1024) + " KB";
     $("stUp").textContent = d.uptimeSec + " s";
     $("tokenCard").style.display = (d.authRequired === false) ? "none" : "block";
+    if (!wifiFieldInit && d.staSsid) { $("wSsid").value = d.staSsid; wifiFieldInit = true; }
+
+    const bw = $("badgeWifi");
+    if (d.staConnected) {
+      bw.style.display = "inline-block";
+      bw.textContent = d.staSsid + " (" + d.staIp + ")";
+    } else {
+      bw.style.display = "none";
+    }
 
     const ba = $("badgeArmed");
     ba.textContent = d.armed ? "ARMED (LOCKED)" : "DISARMED";
@@ -470,8 +668,7 @@ $("btnFlash").onclick = async () => {
 
   if (file.name.toLowerCase().endsWith(".ino")) {
     const src = await file.text();
-    ed.value = src;
-    localStorage.setItem("ota_web_code", src);
+    setEditorCode(src);
     showMsg($("otaMsg"), "info", "Compiling & flashing " + file.name + " (see Code Window log above)...");
     await runCodeAction(true, src);
     return;

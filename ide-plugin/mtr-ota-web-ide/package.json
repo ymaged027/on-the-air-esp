@@ -1,8 +1,8 @@
 {
   "name": "mtr-ota-web-ide",
-  "displayName": "MTR-OTA Web IDE Launcher",
-  "description": "Adds a 1-click button inside Arduino IDE 2 to launch MTR-OTA Web IDE (web-ide.bat).",
-  "version": "1.0.0",
+  "displayName": "MTR-OTA Suite",
+  "description": "1-click Web IDE (with sketch sync & integrated Output panel), Quick HTTP OTA Flash, Live ESP32 Telemetry Status Bar, and Rollback inside Arduino IDE 2.",
+  "version": "2.0.0",
   "publisher": "ymaged027",
   "license": "MIT",
   "engines": {
@@ -19,11 +19,35 @@
     "commands": [
       {
         "command": "mtr-ota.launchWebIde",
-        "title": "MTR-OTA: Launch Web IDE",
+        "title": "MTR-OTA: Open Web IDE (Sync Current Sketch)",
         "icon": {
           "light": "icon-light.svg",
           "dark": "icon-dark.svg"
         }
+      },
+      {
+        "command": "mtr-ota.quickFlash",
+        "title": "MTR-OTA: Quick Wireless Flash (HTTP OTA)",
+        "icon": {
+          "light": "icon-flash-light.svg",
+          "dark": "icon-flash-dark.svg"
+        }
+      },
+      {
+        "command": "mtr-ota.quickMenu",
+        "title": "MTR-OTA: Control Menu"
+      },
+      {
+        "command": "mtr-ota.rollback",
+        "title": "MTR-OTA: Rollback ESP32 to Previous Firmware"
+      },
+      {
+        "command": "mtr-ota.reboot",
+        "title": "MTR-OTA: Reboot ESP32"
+      },
+      {
+        "command": "mtr-ota.stopWebIde",
+        "title": "MTR-OTA: Stop Web IDE Server"
       }
     ],
     "menus": {
@@ -31,6 +55,10 @@
         {
           "command": "mtr-ota.launchWebIde",
           "group": "navigation@1"
+        },
+        {
+          "command": "mtr-ota.quickFlash",
+          "group": "navigation@2"
         }
       ]
     },
@@ -39,15 +67,35 @@
         "command": "mtr-ota.launchWebIde",
         "key": "ctrl+alt+w",
         "mac": "cmd+alt+w"
+      },
+      {
+        "command": "mtr-ota.quickFlash",
+        "key": "ctrl+alt+u",
+        "mac": "cmd+alt+u"
+      },
+      {
+        "command": "mtr-ota.quickMenu",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m"
       }
     ],
     "configuration": {
-      "title": "MTR-OTA Web IDE",
+      "title": "MTR-OTA Suite",
       "properties": {
-        "mtrOta.webIdeBatPath": {
+        "mtrOta.repoPath": {
           "type": "string",
-          "default": "__WEB_IDE_BAT_PATH__",
-          "description": "Path to web-ide.bat (or tools/ota_studio.py) from the on-the-air-esp repository."
+          "default": "__REPO_PATH__",
+          "description": "Path to the on-the-air-esp repository folder."
+        },
+        "mtrOta.studioPort": {
+          "type": "number",
+          "default": 8080,
+          "description": "Local HTTP port for MTR-OTA Web IDE."
+        },
+        "mtrOta.otaPassword": {
+          "type": "string",
+          "default": "mtr-ota007",
+          "description": "OTA password matching OTA_AUTH_TOKEN in src/config.h."
         }
       }
     }
